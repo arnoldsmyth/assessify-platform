@@ -167,6 +167,9 @@ importers:
       '@assessify/domain':
         specifier: workspace:*
         version: link:../domain
+      drizzle-orm:
+        specifier: ^0.44.2
+        version: 0.44.7(@types/pg@8.20.0)(pg@8.22.0)
     devDependencies:
       typescript:
         specifier: ^5.8.0
