@@ -1,0 +1,22 @@
+{
+  "page_count": 3,
+  "page_size_pts": [
+    [
+      595,
+      842
+    ],
+    [
+      595,
+      842
+    ],
+    [
+      595,
+      842
+    ]
+  ],
+  "pages_text": [
+    "Cover Page Sample multi-page assessment report fixture. Page 1 of 3",
+    "Section One: Results Dimension A scored 12 of 20. Dimension B scored 17 of 20. Page 2 of 3",
+    "Section Two: Narrative Closing narrative text on the final page. No break after this section, so the document ends at exactly three pages. Page 3 of 3"
+  ]
+}

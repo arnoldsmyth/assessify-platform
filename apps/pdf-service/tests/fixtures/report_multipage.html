@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Assessify fixture: three-page report with page breaks</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 18mm;
+
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+    }
+  }
+  html { font-family: "DejaVu Sans", sans-serif; font-size: 11pt; color: #1a1a1a; }
+  h1 { font-size: 20pt; margin: 0 0 4mm; }
+  h2 { font-size: 14pt; margin: 0 0 3mm; }
+  /* One logical section per page (spec 09 print template rules). */
+  section.page { break-after: page; }
+  section.page:last-child { break-after: auto; }
+</style>
+</head>
+<body>
+  <section class="page">
+    <h1>Cover Page</h1>
+    <p>Sample multi-page assessment report fixture.</p>
+  </section>
+  <section class="page">
+    <h2>Section One: Results</h2>
+    <p>Dimension A scored 12 of 20. Dimension B scored 17 of 20.</p>
+  </section>
+  <section class="page">
+    <h2>Section Two: Narrative</h2>
+    <p>Closing narrative text on the final page. No break after this
+       section, so the document ends at exactly three pages.</p>
+  </section>
+</body>
+</html>

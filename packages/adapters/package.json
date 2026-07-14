@@ -13,6 +13,7 @@
     "@assessify/domain": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.14.0",
     "typescript": "^5.8.0"
   }
 }
