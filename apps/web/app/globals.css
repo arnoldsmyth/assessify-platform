@@ -1,0 +1,26 @@
+@import 'tailwindcss';
+
+/* Ember tokens + Tailwind theme mapping (packages/ui). Must come after the
+   tailwindcss import so the theme overrides Tailwind defaults. */
+@import '@assessify/ui/styles.css';
+
+/* Tailwind v4 auto-detects sources within this app; the ui package lives
+   outside it, so register it explicitly for class scanning. */
+@source '../../../packages/ui/src';
+
+@layer base {
+  body {
+    @apply bg-surface-page font-sans text-body antialiased;
+  }
+
+  /* Motion: respect prefers-reduced-motion (spec 15, binding). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

@@ -1,0 +1,61 @@
+/**
+ * Tailwind v4 theme for the Ember design system.
+ *
+ * `@theme inline` maps Tailwind's design-token namespaces onto the runtime
+ * CSS variables from tokens.css, so utilities compile to
+ * `var(--color-primary)` etc. Because they resolve through the runtime vars,
+ * per-request branding injection (docs/spec/03-architecture.md) re-themes
+ * every utility — never hardcode palette hex values in class names.
+ *
+ * Import order matters: this file must be imported after `tailwindcss`.
+ */
+@theme inline {
+  /* Colors — names match the spec-15 token table */
+  --color-primary: var(--color-primary);
+  --color-primary-bright: var(--color-primary-bright);
+  --color-primary-tint: var(--color-primary-tint);
+  --color-primary-tint-ink: var(--color-primary-tint-ink);
+  --color-ink: var(--color-ink);
+  --color-body: var(--color-body);
+  --color-muted: var(--color-muted);
+  --color-teal: var(--color-teal);
+  --color-teal-tint: var(--color-teal-tint);
+  --color-amber: var(--color-amber);
+  --color-amber-tint: var(--color-amber-tint);
+  --color-red: var(--color-red);
+  --color-red-tint: var(--color-red-tint);
+  --color-surface: var(--color-surface);
+  --color-surface-page: var(--color-surface-page);
+  --color-border: var(--color-border);
+
+  /* Typography */
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+
+  /* Type scale — spec 15 allows exactly 13/14/16/18/22/28 */
+  --text-xs: var(--text-13);
+  --text-xs--line-height: 1.25rem;
+  --text-sm: var(--text-14);
+  --text-sm--line-height: 1.25rem;
+  --text-base: var(--text-16);
+  --text-base--line-height: 1.5rem;
+  --text-lg: var(--text-18);
+  --text-lg--line-height: 1.625rem;
+  --text-xl: var(--text-22);
+  --text-xl--line-height: 1.875rem;
+  --text-2xl: var(--text-28);
+  --text-2xl--line-height: 2.25rem;
+  /* Sizes outside the scale are not part of the system */
+  --text-3xl: initial;
+  --text-4xl: initial;
+  --text-5xl: initial;
+  --text-6xl: initial;
+  --text-7xl: initial;
+  --text-8xl: initial;
+  --text-9xl: initial;
+
+  /* Shape */
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+}
