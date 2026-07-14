@@ -11,6 +11,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+import { user } from './auth';
 import { roleName } from './enums';
 import { citext } from './helpers';
 import { products } from './catalogue';
@@ -39,12 +40,13 @@ export const clients = pgTable('clients', {
 });
 
 /**
- * Better Auth manages its own user/session/account tables.
- * This table extends its user record.
+ * Extends the Better Auth user record (`auth.ts`) with app-level fields.
  */
 export const userProfiles = pgTable('user_profiles', {
-  /** FK to Better Auth user.id (not enforced — table owned by Better Auth) */
-  userId: text('user_id').primaryKey(),
+  /** FK to Better Auth user.id */
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
   displayName: text('display_name').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -53,7 +55,9 @@ export const roleAssignments = pgTable(
   'role_assignments',
   {
     id: uuid('id').primaryKey(),
-    userId: text('user_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     role: roleName('role').notNull(),
     /** required for assessment_admin */
     productId: uuid('product_id').references(() => products.id),
@@ -75,7 +79,7 @@ export const respondents = pgTable(
     firstName: text('first_name'),
     lastName: text('last_name'),
     /** set if they created an account (retail Pattern 4) */
-    userId: text('user_id'),
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
     language: text('language'),
     source: text('source').notNull().default('native'),
     legacyId: text('legacy_id'),
