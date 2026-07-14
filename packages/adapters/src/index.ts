@@ -3,3 +3,4 @@
 // (enforced by .dependency-cruiser.cjs).
 export * from './mailer/types';
 export * from './pdf/types';
+export * from './queue/types';
