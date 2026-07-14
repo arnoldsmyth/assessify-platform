@@ -1,2 +1,2 @@
-// Postgres (Drizzle) repositories land with A2; Firestore repositories with A4.
-export {};
+// Postgres (Drizzle) repositories. Firestore repositories land with A4.
+export * from './audit-log';

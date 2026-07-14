@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@assessify/db": "workspace:*",
-    "@assessify/domain": "workspace:*"
+    "@assessify/domain": "workspace:*",
+    "drizzle-orm": "^0.44.7",
+    "uuidv7": "^1.2.1"
   },
   "devDependencies": {
     "typescript": "^5.8.0"
