@@ -52,18 +52,37 @@ bd close <id>         # Complete work
 
 ## Build & Test
 
-_Add your build and test commands here_
+pnpm + turborepo monorepo. Node ≥22, pnpm 10.
 
 ```bash
-# Example:
-# npm install
-# npm test
+pnpm install
+pnpm dev               # all apps (turbo)
+pnpm lint              # eslint (flat config, root)
+pnpm lint:boundaries   # dependency-cruiser layer rules — must pass
+pnpm typecheck         # tsc --noEmit per package (turbo)
+pnpm test              # vitest (turbo)
+pnpm build             # next build etc. (turbo)
 ```
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Spec is in `docs/spec/` — start at `docs/spec/00-README.md`. The layer model in
+`docs/spec/03-architecture.md` + `docs/spec/appendix-architecture-layers.md` is
+**non-negotiable**.
+
+- `apps/web` — Next.js App Router; surfaces: `(admin)`, `(respondent)`, `(public)`, plus `api/v1`, `api/webhooks`, `report-print/[id]`
+- `apps/worker` — BullMQ processors, thin: parse job → call service
+- `packages/domain` → innermost: entities, Zod schemas, `Result<T, DomainError>`
+- `packages/services` → all business logic; never imports frameworks, apps, or adapter providers
+- `packages/repositories` → Drizzle/Firestore data access; never imports services
+- `packages/adapters` → interfaces in `src/<name>/types.ts`, concrete providers in `src/<name>/providers/` (injected at composition roots)
+- `packages/db` → drizzle schema + migrations
+- `packages/ui` → shared components + design tokens
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- Layer boundaries enforced by `.dependency-cruiser.cjs` (`pnpm lint:boundaries`); CI fails on violations. Controllers never import repositories or db.
+- Services return `Result<T, DomainError>` (from `@assessify/domain`) — no throwing across layer boundaries for expected failures.
+- TypeScript strict everywhere; Zod validation at every boundary.
+- UUIDv7 PKs; human refs (`ORD-00042`) display-only, never in URLs. Money in integer minor units. Time as `timestamptz` UTC.
+- Secrets only via env (DO App Platform); never commit credentials.

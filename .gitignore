@@ -3,3 +3,19 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Node / monorepo
+node_modules/
+.next/
+dist/
+.turbo/
+*.tsbuildinfo
+coverage/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
