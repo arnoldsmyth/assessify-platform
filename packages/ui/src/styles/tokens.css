@@ -1,0 +1,55 @@
+/**
+ * Ember design tokens — docs/spec/15-brand-design-system.md.
+ *
+ * These are plain runtime CSS variables, deliberately declared UNLAYERED on
+ * :root. Per docs/spec/03-architecture.md the respondent surface's per-product
+ * branding is loaded server-side and injected per request as CSS variables —
+ * overriding these names re-themes every component and Tailwind utility, no
+ * rebuild needed. Ember is the default theme for products without custom
+ * branding, and the fixed theme for the admin surface.
+ *
+ * Contrast rules (binding, spec 15): text on tinted badges always uses the
+ * dark "-tint-ink" shade of the same family; --color-primary-bright never
+ * carries body-sized text.
+ */
+:root {
+  /* Palette — Ember (warm orange + deep teal) */
+  --color-primary: #c2410c; /* primary actions, links, active nav, focus rings */
+  --color-primary-bright: #f97316; /* hover/active emphasis, progress bars, small accents */
+  --color-primary-tint: #fff7ed; /* selected rows, callouts, badge tints */
+  --color-primary-tint-ink: #9a3412; /* text on primary-tint backgrounds */
+  --color-ink: #292524; /* headings, app topbar/sidebar background */
+  --color-body: #44403c; /* body text */
+  --color-muted: #78716c; /* secondary text, placeholders */
+  --color-teal: #0f766e; /* success, completed status, positive deltas */
+  --color-teal-tint: #e1f5f2; /* success/completed badge backgrounds */
+  --color-amber: #b45309; /* warning text (on_hold, pending, low balance) */
+  --color-amber-tint: #fef3c7; /* warning badge backgrounds */
+  --color-red: #b91c1c; /* error text (payment_error, email_error, ...) */
+  --color-red-tint: #fee2e2; /* error badge backgrounds */
+  --color-surface: #ffffff; /* cards */
+  --color-surface-page: #fafaf9; /* page background */
+  --color-border: #e7e5e4; /* hairlines, dividers, input borders */
+
+  /* Typography — Inter (variable, self-hosted via next/font), 400/500/600 only.
+     --font-inter is set by the app shell (next/font); system stack fallback. */
+  --font-sans: var(--font-inter, 'Inter'), ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', sans-serif;
+  /* Reports/PDF narrative default; per-product brand fonts may override. */
+  --font-serif: 'Source Serif 4', ui-serif, Georgia, serif;
+
+  /* Type scale (spec: 13/14/16/18/22/28). Base 14 admin, 16 respondent. */
+  --text-13: 0.8125rem;
+  --text-14: 0.875rem;
+  --text-16: 1rem;
+  --text-18: 1.125rem;
+  --text-22: 1.375rem;
+  --text-28: 1.75rem;
+
+  /* Shape */
+  --radius: 0.375rem;
+
+  /* Motion — 150–200ms ease-out only (spec 15) */
+  --motion-duration: 150ms;
+  --motion-ease: cubic-bezier(0, 0, 0.2, 1);
+}
