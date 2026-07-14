@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "key": "dup-opt",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "multiple_choice",
+          "textKey": "q1.text",
+          "multi": false,
+          "options": [
+            { "key": "a", "labelKey": "a1" },
+            { "key": "a", "labelKey": "a2" }
+          ]
+        }
+      ]
+    }
+  ]
+}

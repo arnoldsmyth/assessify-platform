@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-condition",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "free_text",
+          "textKey": "q1.text",
+          "multiline": false
+        },
+        {
+          "key": "q2",
+          "type": "free_text",
+          "textKey": "q2.text",
+          "multiline": false,
+          "showIf": { "op": "equals", "question": "q1", "value": "x" }
+        }
+      ]
+    }
+  ]
+}

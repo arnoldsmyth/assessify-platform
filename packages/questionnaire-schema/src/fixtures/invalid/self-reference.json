@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "key": "self-ref",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "free_text",
+          "textKey": "q1.text",
+          "multiline": false,
+          "showIf": { "op": "answered", "question": "q1" }
+        }
+      ]
+    }
+  ]
+}

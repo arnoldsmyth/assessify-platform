@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "key": "unknown-ref",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "free_text",
+          "textKey": "q1.text",
+          "multiline": false
+        },
+        {
+          "key": "q2",
+          "type": "free_text",
+          "textKey": "q2.text",
+          "multiline": false,
+          "showIf": {
+            "op": "not",
+            "condition": {
+              "op": "and",
+              "conditions": [{ "op": "eq", "question": "does_not_exist", "value": 1 }]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

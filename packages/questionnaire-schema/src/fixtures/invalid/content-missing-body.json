@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-content",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "content",
+          "textKey": "q1.text",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

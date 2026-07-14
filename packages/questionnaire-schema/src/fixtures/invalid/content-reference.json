@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "key": "content-ref",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "intro_text",
+          "type": "content",
+          "textKey": "intro.text",
+          "bodyKey": "intro.body",
+          "required": false
+        },
+        {
+          "key": "q1",
+          "type": "free_text",
+          "textKey": "q1.text",
+          "multiline": false,
+          "showIf": { "op": "answered", "question": "intro_text" }
+        }
+      ]
+    }
+  ]
+}

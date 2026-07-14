@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-likert",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "likert",
+          "textKey": "q1.text",
+          "scale": { "min": 5, "max": 1, "labelKeys": { "1": "low" }, "presentation": "radio" }
+        }
+      ]
+    }
+  ]
+}

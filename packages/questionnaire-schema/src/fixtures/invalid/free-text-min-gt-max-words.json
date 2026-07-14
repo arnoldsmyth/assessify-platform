@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-free-text",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "free_text",
+          "textKey": "q1.text",
+          "multiline": true,
+          "minWords": 100,
+          "maxWords": 50
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "key": "pro-d-core",
+  "titleKey": "prodcore.title",
+  "settings": {
+    "progressBar": true,
+    "allowBack": true,
+    "randomizeSections": ["work-style", "values"]
+  },
+  "sections": [
+    {
+      "key": "intro",
+      "titleKey": "prodcore.intro.title",
+      "instructionsKey": "prodcore.intro.instructions",
+      "questions": [
+        {
+          "key": "welcome",
+          "type": "content",
+          "textKey": "prodcore.welcome.text",
+          "bodyKey": "prodcore.welcome.body",
+          "mediaUrl": "https://cdn.assessify.example/intro.mp4",
+          "required": false
+        },
+        {
+          "key": "role_tenure",
+          "type": "numeric",
+          "textKey": "prodcore.role_tenure.text",
+          "helpKey": "prodcore.role_tenure.help",
+          "min": 0,
+          "max": 40,
+          "step": 0.5,
+          "unitKey": "common.unit.years",
+          "presentation": "input",
+          "required": true
+        },
+        {
+          "key": "is_manager",
+          "type": "multiple_choice",
+          "textKey": "prodcore.is_manager.text",
+          "multi": false,
+          "options": [
+            { "key": "yes", "labelKey": "common.yes" },
+            { "key": "no", "labelKey": "common.no" }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "work-style",
+      "titleKey": "prodcore.workstyle.title",
+      "questions": [
+        {
+          "key": "ws_focus",
+          "type": "likert",
+          "textKey": "prodcore.ws_focus.text",
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "labelKeys": {
+              "1": "common.scale.strongly_disagree",
+              "3": "common.scale.neutral",
+              "5": "common.scale.strongly_agree"
+            },
+            "presentation": "radio"
+          }
+        },
+        {
+          "key": "ws_habits",
+          "type": "matrix",
+          "textKey": "prodcore.ws_habits.text",
+          "rows": [
+            { "key": "planning", "labelKey": "prodcore.ws_habits.planning" },
+            { "key": "delegation", "labelKey": "prodcore.ws_habits.delegation" },
+            { "key": "feedback", "labelKey": "prodcore.ws_habits.feedback" }
+          ],
+          "scale": {
+            "min": 1,
+            "max": 7,
+            "labelKeys": {
+              "1": "common.scale.never",
+              "7": "common.scale.always"
+            }
+          }
+        },
+        {
+          "key": "ws_delegation_detail",
+          "type": "free_text",
+          "textKey": "prodcore.ws_delegation_detail.text",
+          "multiline": true,
+          "minWords": 10,
+          "maxWords": 200,
+          "maxChars": 2000,
+          "required": false,
+          "showIf": { "op": "eq", "question": "is_manager", "value": "yes" }
+        }
+      ]
+    },
+    {
+      "key": "values",
+      "titleKey": "prodcore.values.title",
+      "questions": [
+        {
+          "key": "values_rank",
+          "type": "ranking",
+          "textKey": "prodcore.values_rank.text",
+          "options": [
+            { "key": "autonomy", "labelKey": "prodcore.values.autonomy" },
+            { "key": "mastery", "labelKey": "prodcore.values.mastery" },
+            { "key": "purpose", "labelKey": "prodcore.values.purpose" },
+            { "key": "security", "labelKey": "prodcore.values.security" }
+          ]
+        },
+        {
+          "key": "values_forced_1",
+          "type": "ipsative_most_least",
+          "textKey": "prodcore.values_forced_1.text",
+          "items": [
+            { "key": "vf1_a", "labelKey": "prodcore.values_forced_1.a" },
+            { "key": "vf1_b", "labelKey": "prodcore.values_forced_1.b" },
+            { "key": "vf1_c", "labelKey": "prodcore.values_forced_1.c" },
+            { "key": "vf1_d", "labelKey": "prodcore.values_forced_1.d" }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "manager-followup",
+      "titleKey": "prodcore.mgrfollow.title",
+      "showIf": {
+        "op": "and",
+        "conditions": [
+          { "op": "eq", "question": "is_manager", "value": "yes" },
+          {
+            "op": "or",
+            "conditions": [
+              { "op": "gte", "question": "role_tenure", "value": 2 },
+              { "op": "answered", "question": "ws_delegation_detail" }
+            ]
+          },
+          { "op": "not", "condition": { "op": "in", "question": "ws_focus", "values": [1, 2] } }
+        ]
+      },
+      "questions": [
+        {
+          "key": "mgr_span",
+          "type": "numeric",
+          "textKey": "prodcore.mgr_span.text",
+          "min": 1,
+          "max": 500,
+          "step": 1,
+          "presentation": "slider"
+        },
+        {
+          "key": "mgr_span_note",
+          "type": "free_text",
+          "textKey": "prodcore.mgr_span_note.text",
+          "multiline": false,
+          "maxChars": 280,
+          "required": false,
+          "showIf": { "op": "gt", "question": "mgr_span", "value": 20 }
+        }
+      ]
+    }
+  ]
+}

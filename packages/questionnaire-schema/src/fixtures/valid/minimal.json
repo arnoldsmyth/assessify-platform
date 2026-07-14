@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "key": "minimal",
+  "titleKey": "minimal.title",
+  "settings": {
+    "progressBar": false,
+    "allowBack": false
+  },
+  "sections": [
+    {
+      "key": "only",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "likert",
+          "textKey": "minimal.q1.text",
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "labelKeys": { "1": "minimal.low", "5": "minimal.high" },
+            "presentation": "slider"
+          }
+        }
+      ]
+    }
+  ]
+}

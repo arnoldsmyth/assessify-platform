@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-numeric",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "numeric",
+          "textKey": "q1.text",
+          "min": 0,
+          "max": 10,
+          "step": 0,
+          "presentation": "input"
+        }
+      ]
+    }
+  ]
+}
