@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Assessify fixture: basic single-page report</title>
+<style>
+  /* Paged-CSS model per docs/spec/09-reports-and-pdf.md: @page defaults here,
+     request pageSize wins via the appended stylesheet. */
+  @page {
+    size: A4;
+    margin: 20mm 18mm;
+  }
+  html { font-family: "DejaVu Sans", sans-serif; font-size: 11pt; color: #1a1a1a; }
+  h1 { font-size: 20pt; margin: 0 0 4mm; }
+  .band { font-weight: bold; }
+  .chart { display: block; margin: 6mm 0; }
+</style>
+</head>
+<body>
+  <section class="page">
+    <h1>Sample Assessment Report</h1>
+    <p>Respondent: Jane Fixture. Completed 2026-01-15.</p>
+    <p>Overall score: 42 — band <span class="band">Developing</span>.</p>
+    <!-- Charts are server-rendered SVG in markup; no JS at render time. -->
+    <svg class="chart" width="300" height="60" viewBox="0 0 300 60"
+         xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Score bar">
+      <rect x="0" y="20" width="300" height="20" fill="#e5e5e5" />
+      <rect x="0" y="20" width="126" height="20" fill="#3a6ea5" />
+    </svg>
+    <p>This fixture exercises a single page with an inline SVG chart and
+       fixed white space to absorb narrative length variance.</p>
+  </section>
+</body>
+</html>

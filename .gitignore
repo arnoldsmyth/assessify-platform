@@ -17,6 +17,12 @@ coverage/
 .env.*
 !.env.example
 
+# Python (apps/pdf-service)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # OS
 .DS_Store
 .claude/worktrees/
