@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-randomize",
+  "titleKey": "t",
+  "settings": {
+    "progressBar": true,
+    "allowBack": true,
+    "randomizeSections": ["nope"]
+  },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "free_text",
+          "textKey": "q1.text",
+          "multiline": false
+        }
+      ]
+    }
+  ]
+}

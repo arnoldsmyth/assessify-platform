@@ -10,6 +10,7 @@
     "dev": "turbo run dev",
     "lint": "eslint .",
     "lint:boundaries": "depcruise apps packages",
+    "qdef": "pnpm --filter @assessify/questionnaire-schema exec tsx src/cli.ts",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test"
   },

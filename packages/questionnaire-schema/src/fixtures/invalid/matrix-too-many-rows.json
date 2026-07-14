@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-matrix",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "matrix",
+          "textKey": "q1.text",
+          "rows": [
+            { "key": "r1", "labelKey": "r1" },
+            { "key": "r2", "labelKey": "r2" },
+            { "key": "r3", "labelKey": "r3" },
+            { "key": "r4", "labelKey": "r4" },
+            { "key": "r5", "labelKey": "r5" },
+            { "key": "r6", "labelKey": "r6" },
+            { "key": "r7", "labelKey": "r7" },
+            { "key": "r8", "labelKey": "r8" },
+            { "key": "r9", "labelKey": "r9" },
+            { "key": "r10", "labelKey": "r10" },
+            { "key": "r11", "labelKey": "r11" },
+            { "key": "r12", "labelKey": "r12" },
+            { "key": "r13", "labelKey": "r13" }
+          ],
+          "scale": { "min": 1, "max": 5, "labelKeys": { "1": "low", "5": "high" } }
+        }
+      ]
+    }
+  ]
+}

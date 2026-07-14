@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-mc-minmax",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "multiple_choice",
+          "textKey": "q1.text",
+          "multi": true,
+          "minSelections": 3,
+          "maxSelections": 2,
+          "options": [
+            { "key": "a", "labelKey": "a" },
+            { "key": "b", "labelKey": "b" },
+            { "key": "c", "labelKey": "c" }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "key": "bad-ranking",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "ranking",
+          "textKey": "q1.text",
+          "options": [
+            { "key": "o1", "labelKey": "o1" },
+            { "key": "o2", "labelKey": "o2" },
+            { "key": "o3", "labelKey": "o3" },
+            { "key": "o4", "labelKey": "o4" },
+            { "key": "o5", "labelKey": "o5" },
+            { "key": "o6", "labelKey": "o6" },
+            { "key": "o7", "labelKey": "o7" },
+            { "key": "o8", "labelKey": "o8" },
+            { "key": "o9", "labelKey": "o9" },
+            { "key": "o10", "labelKey": "o10" },
+            { "key": "o11", "labelKey": "o11" }
+          ]
+        }
+      ]
+    }
+  ]
+}

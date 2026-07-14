@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "key": "dup-q",
+  "titleKey": "t",
+  "settings": { "progressBar": true, "allowBack": true },
+  "sections": [
+    {
+      "key": "s1",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "free_text",
+          "textKey": "q1.text",
+          "multiline": false
+        }
+      ]
+    },
+    {
+      "key": "s2",
+      "questions": [
+        {
+          "key": "q1",
+          "type": "free_text",
+          "textKey": "q1b.text",
+          "multiline": false
+        }
+      ]
+    }
+  ]
+}
