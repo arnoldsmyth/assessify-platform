@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./queue/bullmq": "./src/queue/providers/bullmq.ts",
-    "./pdf/weasyprint": "./src/pdf/providers/weasyprint.ts"
+    "./pdf/weasyprint": "./src/pdf/providers/weasyprint.ts",
+    "./mailer/console": "./src/mailer/providers/console.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
