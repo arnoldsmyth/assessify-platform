@@ -7,16 +7,17 @@ import { getProductService } from '@assessify/services';
 
 import { archiveProductAction, updateProductAction } from '../actions';
 import { ProductForm } from '../_components/product-form';
-import { devActor } from '../_lib/actor';
 import { toFormValues } from '../_lib/form';
+
+import { requireCallerContext } from '@/lib/caller-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EditProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  // TODO(A3): gate on CallerContext once auth lands.
-  const result = await getProductService().get(devActor, id);
+  const caller = await requireCallerContext();
+  const result = await getProductService().get(caller, id);
   if (!result.ok) {
     if (result.error.code === 'product/not_found') notFound();
     throw new Error(result.error.message);

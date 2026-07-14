@@ -1,15 +1,39 @@
-import type { Product } from '@assessify/domain';
+import { ok, type CallerContext, type Product, type RoleAssignment } from '@assessify/domain';
 import type {
   ProductListQuery,
   ProductPatch,
   ProductRepository,
 } from '@assessify/repositories';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { createProductService, type Actor } from './product-service';
+import type { AuditService } from '../audit';
+import { createProductService } from './product-service';
 
-const superAdmin: Actor = { userId: '11111111-1111-7111-8111-111111111111', role: 'super_admin' };
-const clientAdmin: Actor = { userId: '22222222-2222-7222-8222-222222222222', role: 'client_admin' };
+function assignment(role: RoleAssignment['role'], clientId: string | null = null): RoleAssignment {
+  return {
+    role,
+    productId: null,
+    clientId,
+    permissions: {
+      products: [],
+      groups: [],
+      canPlaceOrders: false,
+      canViewResults: false,
+      canReleaseReports: false,
+    },
+  };
+}
+
+const superAdmin: CallerContext = {
+  kind: 'user',
+  id: '11111111-1111-7111-8111-111111111111',
+  roles: [assignment('super_admin')],
+};
+const clientAdmin: CallerContext = {
+  kind: 'user',
+  id: '22222222-2222-7222-8222-222222222222',
+  roles: [assignment('client_admin', '33333333-3333-7333-8333-333333333333')],
+};
 
 function fixtureProduct(overrides: Partial<Product> = {}): Product {
   return {
@@ -73,18 +97,36 @@ function makeRepo(seed: Product[] = []) {
   return { repo, rows };
 }
 
+function makeAudit(): AuditService {
+  return {
+    record: vi.fn(async (actor, action, entityRef, detail) =>
+      ok({
+        id: '01890000-0000-7000-8000-00000000aaaa',
+        actor,
+        action,
+        entityRef,
+        detail: detail ?? {},
+        createdAt: new Date('2026-07-14T12:00:00Z'),
+      })
+    ),
+    listByEntity: vi.fn(),
+  } as unknown as AuditService;
+}
+
 function makeService(seed: Product[] = []) {
   const { repo, rows } = makeRepo(seed);
+  const audit = makeAudit();
   const service = createProductService({
     products: repo,
+    audit,
     now: () => new Date('2026-07-14T12:00:00Z'),
   });
-  return { service, rows };
+  return { service, rows, audit };
 }
 
 describe('productService.create', () => {
   it('creates a product with defaults applied (happy path)', async () => {
-    const { service, rows } = makeService();
+    const { service, rows, audit } = makeService();
 
     const result = await service.create(superAdmin, {
       slug: 'insight-360',
@@ -109,6 +151,12 @@ describe('productService.create', () => {
     expect(product.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(product.createdAt).toEqual(new Date('2026-07-14T12:00:00Z'));
     expect(rows.get(product.id)).toEqual(product);
+    expect(audit.record).toHaveBeenCalledWith(
+      { kind: 'user', id: superAdmin.id },
+      'product.created',
+      { type: 'product', id: product.id },
+      { slug: 'insight-360' }
+    );
   });
 
   it('accepts a full branding config', async () => {

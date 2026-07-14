@@ -1,6 +1,5 @@
 export {
   createProductService,
-  type Actor,
   type ProductList,
   type ProductService,
   type ProductServiceDeps,

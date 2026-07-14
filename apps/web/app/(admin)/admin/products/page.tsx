@@ -5,7 +5,7 @@ import { Button, Card, Input } from '@assessify/ui';
 import { getProductService } from '@assessify/services';
 import type { Product } from '@assessify/domain';
 
-import { devActor } from './_lib/actor';
+import { requireCallerContext } from '@/lib/caller-context';
 
 // Reads live data on every request — never prerendered at build time.
 export const dynamic = 'force-dynamic';
@@ -28,8 +28,8 @@ export default async function ProductsPage({
   const page = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1);
   const pageSize = 20;
 
-  // TODO(A3): gate on CallerContext once auth lands.
-  const result = await getProductService().list(devActor, { search, status, page, pageSize });
+  const caller = await requireCallerContext();
+  const result = await getProductService().list(caller, { search, status, page, pageSize });
 
   return (
     <div className="flex flex-col gap-6">

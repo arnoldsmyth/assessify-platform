@@ -1,11 +1,14 @@
 import {
   createProductSchema,
   err,
+  isSuperAdmin,
   listProductsQuerySchema,
   ok,
   productInvariantIssues,
   updateProductSchema,
   uuidv7,
+  type AuditActor,
+  type CallerContext,
   type DomainError,
   type Product,
   type Result,
@@ -13,29 +16,14 @@ import {
 } from '@assessify/domain';
 import type { ProductPatch, ProductRepository } from '@assessify/repositories';
 
+import type { AuditService } from '../audit';
+
 /**
  * Product catalogue business logic (B1 — spec 04 `products`, spec 11
  * slug/branding rules). Controllers (server actions, API routes) call this;
- * they never touch repositories directly.
+ * they never touch repositories directly. Authorization takes the shared
+ * CallerContext (spec 05); every state change records an audit event (A8).
  */
-
-/**
- * Minimal caller identity — the authorization seam.
- *
- * TODO(A3): replace with the shared CallerContext once auth (Better Auth)
- * lands; the coordinator wires this at merge. Until then controllers pass a
- * stub super_admin actor.
- */
-export interface Actor {
-  readonly userId: string;
-  /** role_name enum (spec 04/05). */
-  readonly role:
-    | 'super_admin'
-    | 'assessment_admin'
-    | 'client_admin'
-    | 'client_user'
-    | 'assessment_taker';
-}
 
 export interface ProductList {
   items: Product[];
@@ -45,20 +33,19 @@ export interface ProductList {
 }
 
 export interface ProductService {
-  create(actor: Actor, input: unknown): Promise<Result<Product>>;
-  update(actor: Actor, id: string, input: unknown): Promise<Result<Product>>;
+  create(caller: CallerContext, input: unknown): Promise<Result<Product>>;
+  update(caller: CallerContext, id: string, input: unknown): Promise<Result<Product>>;
   /** Sets status to 'retired' (spec 04). Idempotent. */
-  archive(actor: Actor, id: string): Promise<Result<Product>>;
-  get(actor: Actor, id: string): Promise<Result<Product>>;
-  list(actor: Actor, query: unknown): Promise<Result<ProductList>>;
+  archive(caller: CallerContext, id: string): Promise<Result<Product>>;
+  get(caller: CallerContext, id: string): Promise<Result<Product>>;
+  list(caller: CallerContext, query: unknown): Promise<Result<ProductList>>;
 }
 
 export interface ProductServiceDeps {
   products: ProductRepository;
+  audit: AuditService;
   now?: () => Date;
   generateId?: () => string;
-  // TODO(A8): accept an auditService once it exists and record
-  // product.created / product.updated / product.archived events.
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -88,14 +75,18 @@ function slugTaken(slug: string): DomainError {
   };
 }
 
-function forbidden(actor: Actor): DomainError | null {
+function forbidden(caller: CallerContext): DomainError | null {
   // Spec 05 access matrix: product management is super_admin only.
-  if (actor.role === 'super_admin') return null;
+  if (isSuperAdmin(caller)) return null;
   return {
     code: 'product/forbidden',
     message: 'Only super admins can manage products',
-    detail: { role: actor.role },
+    detail: { kind: caller.kind, roles: caller.roles.map((r) => r.role) },
   };
+}
+
+function auditActor(caller: CallerContext): AuditActor {
+  return { kind: caller.kind, id: caller.id };
 }
 
 /** Drop keys whose value is undefined so a patch never clobbers with undefined. */
@@ -106,13 +97,16 @@ function definedFields(patch: UpdateProduct): UpdateProduct {
 }
 
 export function createProductService(deps: ProductServiceDeps): ProductService {
-  const { products } = deps;
+  const { products, audit } = deps;
   const now = deps.now ?? (() => new Date());
   const generateId = deps.generateId ?? uuidv7;
 
+  // The state change and its audit entry are not yet one transaction (needs a
+  // unit-of-work across repositories). Until then a failed audit write is
+  // surfaced as the operation's error — loud beats a silent audit gap.
   return {
-    async create(actor, input) {
-      const denied = forbidden(actor);
+    async create(caller, input) {
+      const denied = forbidden(caller);
       if (denied) return err(denied);
 
       const parsed = createProductSchema.safeParse(input);
@@ -147,12 +141,18 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
       };
 
       const created = await products.insert(product);
-      // TODO(A8): audit — record product.created (actor.userId, product.id).
+      const audited = await audit.record(
+        auditActor(caller),
+        'product.created',
+        { type: 'product', id: created.id },
+        { slug: created.slug }
+      );
+      if (!audited.ok) return err(audited.error);
       return ok(created);
     },
 
-    async update(actor, id, input) {
-      const denied = forbidden(actor);
+    async update(caller, id, input) {
+      const denied = forbidden(caller);
       if (denied) return err(denied);
       if (!UUID_RE.test(id)) return err(notFound(id));
 
@@ -178,12 +178,18 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
         updatedAt: now(),
       });
       if (!updated) return err(notFound(id));
-      // TODO(A8): audit — record product.updated (actor.userId, changed keys).
+      const audited = await audit.record(
+        auditActor(caller),
+        'product.updated',
+        { type: 'product', id },
+        { changedFields: Object.keys(patch) }
+      );
+      if (!audited.ok) return err(audited.error);
       return ok(updated);
     },
 
-    async archive(actor, id) {
-      const denied = forbidden(actor);
+    async archive(caller, id) {
+      const denied = forbidden(caller);
       if (denied) return err(denied);
       if (!UUID_RE.test(id)) return err(notFound(id));
 
@@ -193,12 +199,18 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
 
       const archived = await products.update(id, { status: 'retired', updatedAt: now() });
       if (!archived) return err(notFound(id));
-      // TODO(A8): audit — record product.archived (actor.userId, product.id).
+      const audited = await audit.record(
+        auditActor(caller),
+        'product.archived',
+        { type: 'product', id },
+        {}
+      );
+      if (!audited.ok) return err(audited.error);
       return ok(archived);
     },
 
-    async get(actor, id) {
-      const denied = forbidden(actor);
+    async get(caller, id) {
+      const denied = forbidden(caller);
       if (denied) return err(denied);
       if (!UUID_RE.test(id)) return err(notFound(id));
 
@@ -207,8 +219,8 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
       return ok(product);
     },
 
-    async list(actor, query) {
-      const denied = forbidden(actor);
+    async list(caller, query) {
+      const denied = forbidden(caller);
       if (denied) return err(denied);
 
       const parsed = listProductsQuerySchema.safeParse(query ?? {});
