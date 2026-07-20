@@ -68,6 +68,13 @@ services:
         value: ${valkey.DATABASE_URL}
       - key: SENTRY_DSN
         type: SECRET
+      # Tenant resolution (F1, spec 11). Staging slugs: {slug}.staging.assessify.ie
+      - key: ADMIN_HOSTNAMES
+        value: staging.assessify.ie
+      - key: PLATFORM_HOSTNAMES
+        value: staging.assessify.ie
+      - key: PRODUCT_SLUG_BASE_DOMAINS
+        value: staging.assessify.ie
 
   # Internal-only component: no routes, reachable as http://pdf-service:8080
   # from web/worker over the app's private network (docs/spec/09).

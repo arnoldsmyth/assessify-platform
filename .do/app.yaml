@@ -69,6 +69,13 @@ services:
         value: ${valkey.DATABASE_URL}
       - key: SENTRY_DSN
         type: SECRET
+      # Tenant resolution (F1, spec 11)
+      - key: ADMIN_HOSTNAMES
+        value: app.assessify.ie
+      - key: PLATFORM_HOSTNAMES
+        value: assessify.ie,www.assessify.ie
+      - key: PRODUCT_SLUG_BASE_DOMAINS
+        value: assessify.ie
 
   # Internal-only component: no routes, reachable as http://pdf-service:8080
   # from web/worker over the app's private network (docs/spec/09).
