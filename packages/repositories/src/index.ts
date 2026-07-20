@@ -7,6 +7,15 @@ import type { ProductRepository } from './products/product-repository';
 export * from './audit-log';
 export { getDbHandle } from './postgres/client';
 export {
+  createOrderRepository,
+  type NewOrder,
+  type NewOrderItem,
+  type OrderListQuery,
+  type OrderPage,
+  type OrderRepository,
+  type OrderStatusPatch,
+} from './postgres/orders';
+export {
   createRoleAssignmentRepository,
   type RoleAssignmentRepository,
 } from './postgres/role-assignments';
