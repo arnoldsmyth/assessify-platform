@@ -200,6 +200,9 @@ importers:
       '@assessify/domain':
         specifier: workspace:*
         version: link:../domain
+      '@assessify/questionnaire-schema':
+        specifier: workspace:*
+        version: link:../questionnaire-schema
       drizzle-orm:
         specifier: ^0.44.7
         version: 0.44.7(@types/pg@8.20.0)(kysely@0.29.3)(pg@8.22.0)
@@ -219,9 +222,15 @@ importers:
       '@assessify/domain':
         specifier: workspace:*
         version: link:../domain
+      '@assessify/questionnaire-schema':
+        specifier: workspace:*
+        version: link:../questionnaire-schema
       '@assessify/repositories':
         specifier: workspace:*
         version: link:../repositories
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       typescript:
         specifier: ^5.8.0

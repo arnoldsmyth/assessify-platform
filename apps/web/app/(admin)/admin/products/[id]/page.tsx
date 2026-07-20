@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Archive, ArrowLeft } from 'lucide-react';
+import { Archive, ArrowLeft, FileJson } from 'lucide-react';
 
 import { Button } from '@assessify/ui';
 import { getProductService } from '@assessify/services';
@@ -44,14 +44,22 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
             {product.status === 'retired' ? ' · retired' : ''}
           </p>
         </div>
-        {product.status === 'active' ? (
-          <form action={archiveAction}>
-            <Button type="submit" variant="outline">
-              <Archive size={16} strokeWidth={1.75} aria-hidden="true" />
-              Archive product
-            </Button>
-          </form>
-        ) : null}
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href={`/admin/products/${product.id}/questionnaires`}>
+              <FileJson size={16} strokeWidth={1.75} aria-hidden="true" />
+              Questionnaire versions
+            </Link>
+          </Button>
+          {product.status === 'active' ? (
+            <form action={archiveAction}>
+              <Button type="submit" variant="outline">
+                <Archive size={16} strokeWidth={1.75} aria-hidden="true" />
+                Archive product
+              </Button>
+            </form>
+          ) : null}
+        </div>
       </div>
 
       <ProductForm

@@ -12,6 +12,7 @@
   "dependencies": {
     "@assessify/db": "workspace:*",
     "@assessify/domain": "workspace:*",
+    "@assessify/questionnaire-schema": "workspace:*",
     "drizzle-orm": "^0.44.7",
     "uuidv7": "^1.2.1"
   },
