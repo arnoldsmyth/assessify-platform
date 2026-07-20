@@ -17,6 +17,15 @@ export {
   type QuestionnaireVersionStatus,
 } from './postgres/questionnaire-versions';
 export {
+  createOrderRepository,
+  type NewOrder,
+  type NewOrderItem,
+  type OrderListQuery,
+  type OrderPage,
+  type OrderRepository,
+  type OrderStatusPatch,
+} from './postgres/orders';
+export {
   createRoleAssignmentRepository,
   type RoleAssignmentRepository,
 } from './postgres/role-assignments';
