@@ -6,6 +6,7 @@ import type {
   OrderReportModel,
   OrderStatus,
   OrderType,
+  PaymentProvider,
 } from '@assessify/domain';
 import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
 
@@ -56,6 +57,11 @@ export interface OrderRepository {
    * concurrently transitioned — the service reports a conflict either way.
    */
   updateStatus(id: string, expectedStatus: OrderStatus, patch: OrderStatusPatch): Promise<Order | null>;
+  /**
+   * Record the provider chosen at the payment step (D3) — not a status
+   * change, so it bypasses the state-machine patch on purpose.
+   */
+  setPaymentProvider(id: string, provider: PaymentProvider | null): Promise<void>;
   list(query: OrderListQuery): Promise<OrderPage>;
 }
 
@@ -204,6 +210,13 @@ export function createOrderRepository(db: Database): OrderRepository {
         .returning();
       const row = rows[0];
       return row ? toOrderEntity(row) : null;
+    },
+
+    async setPaymentProvider(id, provider) {
+      await db
+        .update(orders)
+        .set({ paymentProvider: provider, updatedAt: new Date() })
+        .where(eq(orders.id, id));
     },
 
     async list(query) {

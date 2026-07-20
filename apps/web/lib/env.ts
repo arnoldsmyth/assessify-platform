@@ -20,6 +20,16 @@ const serverEnvSchema = z.object({
    * until it is configured — never verify-less.
    */
   SENDGRID_WEBHOOK_PUBLIC_KEY: z.string().min(1).optional(),
+  /**
+   * Stripe secret API key (`sk_…`) for the card payment adapter. Optional:
+   * card payments are unavailable (payment/provider_unavailable) until set.
+   */
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  /**
+   * Stripe webhook signing secret (`whsec_…`). Optional: /api/webhooks/stripe
+   * answers 503 until it is configured — never verify-less.
+   */
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
   /** Platform sender identity for auth/system mail (spec 13; per-product senders come from product branding). */
   MAIL_FROM_NAME: z.string().min(1).default('Assessify'),
   MAIL_FROM_ADDRESS: z.string().email().default('no-reply@assessify.local'),
