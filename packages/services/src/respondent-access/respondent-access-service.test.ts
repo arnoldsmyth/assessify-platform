@@ -39,6 +39,9 @@ function makeSessionRepo(seed: RespondentAccessSession[]) {
   return {
     findByToken: vi.fn(async (token: string) => seed.find((s) => s.token === token) ?? null),
     findById: vi.fn(async (id: string) => seed.find((s) => s.id === id) ?? null),
+    // C2 fulfilment transitions — unused by the access service.
+    markStarted: vi.fn(async () => undefined),
+    markCompleted: vi.fn(async () => undefined),
   } satisfies RespondentSessionRepository;
 }
 

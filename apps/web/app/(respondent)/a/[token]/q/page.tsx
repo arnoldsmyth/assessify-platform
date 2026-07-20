@@ -3,17 +3,20 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import { RESPONDENT_SESSION_COOKIE } from '@assessify/domain';
-import { getRespondentAccessService } from '@assessify/services';
+import { getQuestionnaireSessionService, getRespondentAccessService } from '@assessify/services';
 
 import { AccessShell } from '../../../access/_components/access-shell';
+import { QuestionnaireRenderer } from './_components/questionnaire-renderer';
 
 export const metadata: Metadata = { title: 'Assessment' };
 
 /**
- * Cookie-guarded questionnaire route `/a/{token}/q` (spec 07). C1 owns only
- * the gate: a valid signed `resp_session` cookie that belongs to THIS
- * token's session, else back to PIN entry. The questionnaire renderer (C2)
- * replaces the placeholder body below.
+ * Questionnaire route `/a/{token}/q` (C2 — spec 07). The C1 cookie gate is
+ * unchanged: a valid signed `resp_session` cookie that belongs to THIS
+ * token's session, else back to PIN entry. The gate then hands the raw
+ * cookie to the questionnaire session service, which loads the pinned
+ * definition + saved answers + resume position (creating the draft response
+ * on first load). Thin controller: all flow rules live in the service.
  */
 export default async function QuestionnairePage({
   params,
@@ -35,11 +38,38 @@ export default async function QuestionnairePage({
     redirect(`/a/${token}`);
   }
 
+  const state = await getQuestionnaireSessionService().loadState(sessionCookie);
+  if (!state.ok) {
+    if (state.error.code.startsWith('respondent_access/')) redirect(`/a/${token}`);
+    return (
+      <AccessShell title="Assessment unavailable" description={state.error.message}>
+        <p className="text-sm text-body">
+          Please try again later or contact the person who invited you.
+        </p>
+      </AccessShell>
+    );
+  }
+
+  // Submitted responses are immutable (spec 07) — reopening the link only
+  // ever shows the confirmation.
+  if (state.value.status === 'submitted') {
+    return (
+      <AccessShell
+        title="Already submitted"
+        description="Your answers have been submitted and can no longer be changed."
+      >
+        <p className="text-sm text-body">You can close this window.</p>
+      </AccessShell>
+    );
+  }
+
   return (
-    <AccessShell title="You're in" description="Your access has been verified.">
-      <p className="text-sm text-body">
-        The questionnaire will load here once the questionnaire engine (C2) lands.
-      </p>
-    </AccessShell>
+    <QuestionnaireRenderer
+      token={token}
+      definition={state.value.definition}
+      initialAnswers={state.value.answers}
+      initialProgress={state.value.progress}
+      resumeSectionIndex={state.value.resumeSectionIndex}
+    />
   );
 }

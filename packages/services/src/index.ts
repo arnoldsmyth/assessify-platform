@@ -4,6 +4,7 @@ export * from './health';
 export * from './orders';
 export * from './notifications';
 export * from './products';
+export * from './questionnaire-session';
 export * from './questionnaires';
 export * from './respondent-access';
 export * from './translations';

@@ -1,23 +1,36 @@
 import { respondentSessions } from '@assessify/db';
 import { respondentAccessSessionSchema, type RespondentAccessSession } from '@assessify/domain';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
 import { getDbHandle } from './client';
 
 /**
- * Data access for respondent token+PIN verification (spec 05, patterns 1/2).
+ * Data access for respondent sessions (spec 05 access + spec 07 flow).
  *
- * Read-only projection of `respondent_sessions`: C1 verification never
- * mutates the session row itself (`started_at`/`status` transitions belong to
- * the questionnaire engine, C2). Failed-PIN counters and lockout timestamps
- * are NOT columns on this table — spec 05 keeps them in a volatile store
- * (Valkey); see `PinAttemptStore` in `../respondent-access/pin-attempt-store`.
+ * C1 verification only reads; the questionnaire engine (C2) owns the two
+ * fulfilment transitions on this table: `markStarted` when the questionnaire
+ * first loads and `markCompleted` at submit (spec 07 "Completion"). Both are
+ * status-guarded so they are race-free and never rewind later lifecycle
+ * states (`awaiting_scores`, `scored`, ...). Failed-PIN counters and lockout
+ * timestamps are NOT columns on this table — spec 05 keeps them in a volatile
+ * store (Valkey); see `PinAttemptStore` in
+ * `../respondent-access/pin-attempt-store`.
  */
 export interface RespondentSessionRepository {
   /** Look up a session by its opaque URL token. Null when unknown. */
   findByToken(token: string): Promise<RespondentAccessSession | null>;
   /** Look up a session by primary key (signed-cookie validation). */
   findById(id: string): Promise<RespondentAccessSession | null>;
+  /**
+   * created/invited → started (sets `started_at` once). No-op for sessions
+   * already started or further along.
+   */
+  markStarted(id: string, at: Date): Promise<void>;
+  /**
+   * created/invited/started → completed (sets `completed_at`). No-op once the
+   * session is completed or beyond.
+   */
+  markCompleted(id: string, at: Date): Promise<void>;
 }
 
 type SessionRow = typeof respondentSessions.$inferSelect;
@@ -59,6 +72,28 @@ export function createRespondentSessionRepository(
     },
     findById(id: string) {
       return findOne(eq(respondentSessions.id, id));
+    },
+    async markStarted(id: string, at: Date) {
+      await db
+        .update(respondentSessions)
+        .set({ status: 'started', startedAt: at, updatedAt: at })
+        .where(
+          and(
+            eq(respondentSessions.id, id),
+            inArray(respondentSessions.status, ['created', 'invited'])
+          )
+        );
+    },
+    async markCompleted(id: string, at: Date) {
+      await db
+        .update(respondentSessions)
+        .set({ status: 'completed', completedAt: at, updatedAt: at })
+        .where(
+          and(
+            eq(respondentSessions.id, id),
+            inArray(respondentSessions.status, ['created', 'invited', 'started'])
+          )
+        );
     },
   };
 }
