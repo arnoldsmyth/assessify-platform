@@ -13,7 +13,8 @@
   "dependencies": {
     "@assessify/adapters": "workspace:*",
     "@assessify/domain": "workspace:*",
-    "@assessify/repositories": "workspace:*"
+    "@assessify/repositories": "workspace:*",
+    "bcryptjs": "^3.0.3"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

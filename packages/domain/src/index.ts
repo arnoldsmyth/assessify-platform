@@ -3,5 +3,6 @@ export * from './caller-context';
 export * from './errors';
 export * from './jobs';
 export * from './products';
+export * from './respondent-access';
 export * from './result';
 export * from './uuid';
