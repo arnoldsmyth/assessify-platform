@@ -18,6 +18,7 @@ import type {
 import { z } from 'zod';
 
 import type { AuditService } from '../audit';
+import { canBrowseOrderCatalogue } from '../products/product-service';
 
 /**
  * Questionnaire version lifecycle (B3 — spec 07 "Versioning rules", spec 04
@@ -56,6 +57,25 @@ export interface QuestionnaireVersionService {
     caller: CallerContext,
     productId: string
   ): Promise<Result<QuestionnaireVersion[]>>;
+  /**
+   * Active versions of a product as a slim projection for the order wizard
+   * (spec 06 step 1: "choose product → active questionnaire version"; orders
+   * pin the version at creation). Unlike the management methods, this is
+   * available to order placers (spec 05: super_admin, client_admin,
+   * client_user with canPlaceOrders) and to the product's managers.
+   */
+  listActiveForOrdering(
+    caller: CallerContext,
+    productId: string
+  ): Promise<Result<ActiveQuestionnaireVersion[]>>;
+}
+
+/** Slim, definition-free projection for order placement UIs. */
+export interface ActiveQuestionnaireVersion {
+  id: string;
+  version: number;
+  /** 'self' or a rater variant key — named/bulk_named orders use 'self'. */
+  variant: string;
 }
 
 export interface QuestionnaireVersionServiceDeps {
@@ -267,6 +287,29 @@ export function createQuestionnaireVersionService(
       if (!product) return err(productNotFound(productId));
 
       return ok(await questionnaireVersions.listByProduct(productId));
+    },
+
+    async listActiveForOrdering(caller, productId) {
+      if (!UUID_RE.test(productId)) return err(productNotFound(productId));
+      if (!canBrowseOrderCatalogue(caller) && !canManage(caller, productId)) {
+        return err(forbidden(caller));
+      }
+
+      const product = await products.findById(productId);
+      if (!product) return err(productNotFound(productId));
+
+      const versions = await questionnaireVersions.listByProduct(productId);
+      return ok(
+        versions
+          .filter((version) => version.status === 'active')
+          .map(
+            (version): ActiveQuestionnaireVersion => ({
+              id: version.id,
+              version: version.version,
+              variant: version.variant,
+            })
+          )
+      );
     },
   };
 }

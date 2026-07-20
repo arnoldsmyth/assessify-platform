@@ -366,3 +366,66 @@ describe('productService.list / get', () => {
     expect(missing.ok).toBe(false);
   });
 });
+
+describe('productService.listOrderable', () => {
+  const orderingClientUser: CallerContext = {
+    kind: 'user',
+    id: '44444444-4444-7444-8444-444444444444',
+    roles: [
+      {
+        ...assignment('client_user', '33333333-3333-7333-8333-333333333333'),
+        permissions: {
+          products: 'all',
+          groups: 'all',
+          canPlaceOrders: true,
+          canViewResults: false,
+          canReleaseReports: false,
+        },
+      },
+    ],
+  };
+
+  it('returns a slim, name-sorted projection of active products to order placers', async () => {
+    const active = fixtureProduct({ retailEnabled: true, retailPrice: 15000, retailCurrency: 'EUR' });
+    const retired = fixtureProduct({
+      id: '01890000-0000-7000-8000-000000000002',
+      slug: 'old',
+      name: 'Aardvark (retired)',
+      status: 'retired',
+    });
+    const { service } = makeService([active, retired]);
+
+    for (const caller of [superAdmin, clientAdmin, orderingClientUser]) {
+      const result = await service.listOrderable(caller);
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.value).toEqual([
+        {
+          id: active.id,
+          name: 'PRO-D',
+          defaultLanguage: 'en',
+          availableLanguages: ['en'],
+          reportPageSizeDefault: 'a4',
+          retailPrice: 15000,
+          retailCurrency: 'EUR',
+        },
+      ]);
+    }
+  });
+
+  it('denies callers who cannot place orders', async () => {
+    const { service } = makeService([fixtureProduct()]);
+    const viewer: CallerContext = {
+      ...clientAdmin,
+      roles: [assignment('client_user', '33333333-3333-7333-8333-333333333333')],
+    };
+    for (const caller of [
+      viewer,
+      { kind: 'api_key', id: 'key-1', roles: [] } as CallerContext,
+    ]) {
+      const result = await service.listOrderable(caller);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('product/forbidden');
+    }
+  });
+});

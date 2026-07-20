@@ -1,6 +1,7 @@
 export {
   createQuestionnaireVersionService,
   importQuestionnaireVersionSchema,
+  type ActiveQuestionnaireVersion,
   type ImportQuestionnaireVersionInput,
   type QuestionnaireVersionService,
   type QuestionnaireVersionServiceDeps,

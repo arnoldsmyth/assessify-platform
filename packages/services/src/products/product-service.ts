@@ -32,6 +32,22 @@ export interface ProductList {
   pageSize: number;
 }
 
+/**
+ * Slim catalogue projection for order placement (D2 wizard). Deliberately
+ * excludes branding/scoring/royalty config — order placers only need what the
+ * wizard shows (spec 06 wizard steps 2–3).
+ */
+export interface OrderableProduct {
+  id: string;
+  name: string;
+  defaultLanguage: string;
+  availableLanguages: string[];
+  reportPageSizeDefault: 'a4' | 'letter';
+  /** Retail/list price fallback for the pricing step (integer minor units). */
+  retailPrice: number | null;
+  retailCurrency: string | null;
+}
+
 export interface ProductService {
   create(caller: CallerContext, input: unknown): Promise<Result<Product>>;
   update(caller: CallerContext, id: string, input: unknown): Promise<Result<Product>>;
@@ -39,6 +55,13 @@ export interface ProductService {
   archive(caller: CallerContext, id: string): Promise<Result<Product>>;
   get(caller: CallerContext, id: string): Promise<Result<Product>>;
   list(caller: CallerContext, query: unknown): Promise<Result<ProductList>>;
+  /**
+   * Active products for the order wizard, name A→Z. Available to anyone who
+   * may place orders (spec 05: super_admin, client_admin, client_user with
+   * canPlaceOrders) — unlike the management methods above, which are
+   * super_admin only.
+   */
+  listOrderable(caller: CallerContext): Promise<Result<OrderableProduct[]>>;
 }
 
 export interface ProductServiceDeps {
@@ -87,6 +110,21 @@ function forbidden(caller: CallerContext): DomainError | null {
 
 function auditActor(caller: CallerContext): AuditActor {
   return { kind: caller.kind, id: caller.id };
+}
+
+/**
+ * Spec 05: order placement is super_admin (any client), client_admin, or
+ * client_user with canPlaceOrders. Those callers may browse the orderable
+ * catalogue; which client they may order FOR is the order service's check.
+ */
+export function canBrowseOrderCatalogue(caller: CallerContext): boolean {
+  if (caller.kind === 'system') return true;
+  if (caller.kind !== 'user') return false;
+  if (isSuperAdmin(caller)) return true;
+  return caller.roles.some(
+    (a) =>
+      a.role === 'client_admin' || (a.role === 'client_user' && a.permissions.canPlaceOrders)
+  );
 }
 
 /** Drop keys whose value is undefined so a patch never clobbers with undefined. */
@@ -234,6 +272,33 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
         offset: (page - 1) * pageSize,
       });
       return ok({ items: result.items, total: result.total, page, pageSize });
+    },
+
+    async listOrderable(caller) {
+      if (!canBrowseOrderCatalogue(caller)) {
+        return err({
+          code: 'product/forbidden',
+          message: 'You do not have permission to place orders',
+          detail: { kind: caller.kind, roles: caller.roles.map((r) => r.role) },
+        });
+      }
+      const result = await products.list({ status: 'active', limit: 500, offset: 0 });
+      return ok(
+        result.items
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(
+            (product): OrderableProduct => ({
+              id: product.id,
+              name: product.name,
+              defaultLanguage: product.defaultLanguage,
+              availableLanguages: product.availableLanguages,
+              reportPageSizeDefault: product.reportPageSizeDefault,
+              retailPrice: product.retailPrice,
+              retailCurrency: product.retailCurrency,
+            })
+          )
+      );
     },
   };
 }

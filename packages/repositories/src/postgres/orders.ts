@@ -1,11 +1,19 @@
-import { orderItems, orders, type Database } from '@assessify/db';
+import {
+  orderItems,
+  orders,
+  respondentSessions,
+  respondents,
+  type Database,
+} from '@assessify/db';
 import type {
   Order,
   OrderItem,
   OrderPlacedVia,
   OrderReportModel,
+  OrderSessionSummary,
   OrderStatus,
   OrderType,
+  RespondentSessionStatus,
 } from '@assessify/domain';
 import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
 
@@ -20,6 +28,36 @@ import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
 export type NewOrder = Omit<Order, 'reference'>;
 
 export type NewOrderItem = Omit<OrderItem, 'orderId'>;
+
+/**
+ * Respondent identity captured by the wizard for one session. `id` is used
+ * only when no existing respondent matches the email (find-or-create — email
+ * is the dedupe anchor per spec 04; the wizard's values refresh the name and
+ * language on a match).
+ */
+export interface NewOrderRespondent {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  language: string | null;
+}
+
+/**
+ * One `respondent_sessions` row to create with the order (named/bulk_named:
+ * respondents are known at order time — spec 05 patterns 1/2). The PIN is NOT
+ * set here: it is generated and bcrypt-hashed at invitation dispatch (D5),
+ * because the plaintext is sent only in the invitation email (spec 05).
+ */
+export interface NewOrderSession {
+  id: string;
+  /** UUIDv4 URL secret (spec 05 token rules). */
+  token: string;
+  questionnaireVersionId: string;
+  language: string | null;
+  respondent: NewOrderRespondent;
+  createdAt: Date;
+}
 
 /** Fields a status transition may touch — nothing else is updatable here. */
 export interface OrderStatusPatch {
@@ -46,10 +84,16 @@ export interface OrderPage {
 }
 
 export interface OrderRepository {
-  /** Insert order + items atomically; the DB sequence supplies the ORD-xxxxx reference. */
-  insert(order: NewOrder, items: NewOrderItem[]): Promise<Order>;
+  /**
+   * Insert order + items + respondent sessions atomically; the DB sequence
+   * supplies the ORD-xxxxx reference. Respondents are found-or-created by
+   * email inside the same transaction.
+   */
+  insert(order: NewOrder, items: NewOrderItem[], sessions: NewOrderSession[]): Promise<Order>;
   findById(id: string): Promise<Order | null>;
   findItems(orderId: string): Promise<OrderItem[]>;
+  /** Sessions on the order with respondent identity, oldest first. */
+  findSessions(orderId: string): Promise<OrderSessionSummary[]>;
   /**
    * Compare-and-set status update: applies the patch only while the row still
    * has `expectedStatus`. Returns null when the order is missing OR was
@@ -113,7 +157,7 @@ function toItemEntity(row: OrderItemRow): OrderItem {
 
 export function createOrderRepository(db: Database): OrderRepository {
   return {
-    async insert(order, items) {
+    async insert(order, items, sessions) {
       return db.transaction(async (tx) => {
         const [row] = await tx
           .insert(orders)
@@ -168,6 +212,58 @@ export function createOrderRepository(db: Database): OrderRepository {
             }))
           );
         }
+
+        // Sessions + respondents in the same transaction: find-or-create the
+        // respondent by email (citext — case-insensitive dedupe anchor, spec
+        // 04); a match refreshes name/language with the wizard's values.
+        for (const session of sessions) {
+          const existing = await tx
+            .select({ id: respondents.id })
+            .from(respondents)
+            .where(eq(respondents.email, session.respondent.email))
+            .limit(1);
+          let respondentId = existing[0]?.id;
+          if (respondentId) {
+            await tx
+              .update(respondents)
+              .set({
+                firstName: session.respondent.firstName,
+                lastName: session.respondent.lastName,
+                ...(session.respondent.language
+                  ? { language: session.respondent.language }
+                  : {}),
+                updatedAt: session.createdAt,
+              })
+              .where(eq(respondents.id, respondentId));
+          } else {
+            respondentId = session.respondent.id;
+            await tx.insert(respondents).values({
+              id: respondentId,
+              email: session.respondent.email,
+              firstName: session.respondent.firstName,
+              lastName: session.respondent.lastName,
+              language: session.respondent.language,
+              createdAt: session.createdAt,
+              updatedAt: session.createdAt,
+            });
+          }
+
+          await tx.insert(respondentSessions).values({
+            id: session.id,
+            orderId: row.id,
+            respondentId,
+            token: session.token,
+            // PIN is generated + hashed at invitation dispatch (D5).
+            pinHash: null,
+            status: 'created',
+            isFocal: true,
+            questionnaireVersionId: session.questionnaireVersionId,
+            language: session.language,
+            createdAt: session.createdAt,
+            updatedAt: session.createdAt,
+          });
+        }
+
         return toOrderEntity(row);
       });
     },
@@ -185,6 +281,51 @@ export function createOrderRepository(db: Database): OrderRepository {
         .where(eq(orderItems.orderId, orderId))
         .orderBy(asc(orderItems.lineNo));
       return rows.map(toItemEntity);
+    },
+
+    async findSessions(orderId) {
+      const rows = await db
+        .select({
+          id: respondentSessions.id,
+          orderId: respondentSessions.orderId,
+          respondentId: respondentSessions.respondentId,
+          status: respondentSessions.status,
+          isFocal: respondentSessions.isFocal,
+          language: respondentSessions.language,
+          invitedAt: respondentSessions.invitedAt,
+          startedAt: respondentSessions.startedAt,
+          completedAt: respondentSessions.completedAt,
+          createdAt: respondentSessions.createdAt,
+          respondentEmail: respondents.email,
+          respondentFirstName: respondents.firstName,
+          respondentLastName: respondents.lastName,
+        })
+        .from(respondentSessions)
+        .leftJoin(respondents, eq(respondentSessions.respondentId, respondents.id))
+        .where(eq(respondentSessions.orderId, orderId))
+        .orderBy(asc(respondentSessions.createdAt), asc(respondentSessions.id));
+      return rows.map(
+        (row): OrderSessionSummary => ({
+          id: row.id,
+          orderId: row.orderId,
+          respondentId: row.respondentId,
+          status: row.status as RespondentSessionStatus,
+          isFocal: row.isFocal,
+          language: row.language,
+          invitedAt: row.invitedAt,
+          startedAt: row.startedAt,
+          completedAt: row.completedAt,
+          createdAt: row.createdAt,
+          respondent:
+            row.respondentId === null
+              ? null
+              : {
+                  email: row.respondentEmail,
+                  firstName: row.respondentFirstName,
+                  lastName: row.respondentLastName,
+                },
+        })
+      );
     },
 
     async updateStatus(id, expectedStatus, patch) {

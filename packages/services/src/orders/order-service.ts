@@ -14,6 +14,7 @@ import {
   productScopeIds,
   resolveOrderTransitionTarget,
   transitionOrderSchema,
+  uuid4,
   uuidv7,
   type AuditActor,
   type CallerContext,
@@ -21,11 +22,18 @@ import {
   type Order,
   type OrderEvent,
   type OrderItem,
+  type OrderSessionSummary,
   type OrderStatus,
   type OrderTransitionActor,
   type Result,
 } from '@assessify/domain';
-import type { NewOrder, OrderRepository, OrderStatusPatch } from '@assessify/repositories';
+import type {
+  AuditLogPage,
+  NewOrder,
+  NewOrderSession,
+  OrderRepository,
+  OrderStatusPatch,
+} from '@assessify/repositories';
 
 import type { AuditService } from '../audit';
 
@@ -41,6 +49,8 @@ import type { AuditService } from '../audit';
 export interface OrderWithItems {
   order: Order;
   items: OrderItem[];
+  /** Respondent sessions on the order (named/bulk_named: created with it). */
+  sessions: OrderSessionSummary[];
 }
 
 export interface OrderList {
@@ -51,12 +61,17 @@ export interface OrderList {
 }
 
 export interface OrderService {
-  /** Create a draft order (named/bulk_named) with its pricing snapshot. */
+  /**
+   * Create a draft order (named/bulk_named) with its pricing snapshot and one
+   * respondent session per captured respondent (find-or-create by email).
+   */
   create(caller: CallerContext, input: unknown): Promise<Result<Order>>;
   /** Apply one state-machine event; illegal transitions return typed errors. */
   transition(caller: CallerContext, orderId: string, input: unknown): Promise<Result<Order>>;
   get(caller: CallerContext, orderId: string): Promise<Result<OrderWithItems>>;
   list(caller: CallerContext, query: unknown): Promise<Result<OrderList>>;
+  /** Audit trail for the order (creation + every transition), newest first. */
+  history(caller: CallerContext, orderId: string): Promise<Result<AuditLogPage>>;
 }
 
 export interface OrderServiceDeps {
@@ -64,6 +79,8 @@ export interface OrderServiceDeps {
   audit: AuditService;
   now?: () => Date;
   generateId?: () => string;
+  /** Session URL tokens — UUIDv4 by default (spec 05: no time-ordering leakage). */
+  generateToken?: () => string;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -188,6 +205,7 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
   const { orders, audit } = deps;
   const now = deps.now ?? (() => new Date());
   const generateId = deps.generateId ?? uuidv7;
+  const generateToken = deps.generateToken ?? uuid4;
 
   return {
     async create(caller, input) {
@@ -249,8 +267,25 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
         discount: item.discount,
         quantity: item.quantity,
       }));
+      // One session per respondent, created with the order (spec 05 patterns
+      // 1/2: identity known at order time). PINs are generated at invitation
+      // dispatch (D5) — the plaintext only ever travels in the invite email.
+      const sessions: NewOrderSession[] = data.respondents.map((respondent) => ({
+        id: generateId(),
+        token: generateToken(),
+        questionnaireVersionId: data.questionnaireVersionId,
+        language: respondent.language ?? data.reportLanguage,
+        respondent: {
+          id: generateId(),
+          email: respondent.email,
+          firstName: respondent.firstName,
+          lastName: respondent.lastName,
+          language: respondent.language ?? null,
+        },
+        createdAt: timestamp,
+      }));
 
-      const created = await orders.insert(order, items);
+      const created = await orders.insert(order, items, sessions);
       const audited = await audit.record(
         auditActor(caller),
         'order.created',
@@ -263,6 +298,8 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
           currency: created.currency,
           total: created.total,
           isTest: created.isTest,
+          // Count only — respondent PII never enters the audit log.
+          respondentCount: sessions.length,
         }
       );
       if (!audited.ok) return err(audited.error);
@@ -356,8 +393,20 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
       const order = await orders.findById(orderId);
       if (!order) return err(notFound(orderId));
       if (!canViewOrder(caller, order)) return err(notFound(orderId));
-      const items = await orders.findItems(orderId);
-      return ok({ order, items });
+      const [items, sessions] = await Promise.all([
+        orders.findItems(orderId),
+        orders.findSessions(orderId),
+      ]);
+      return ok({ order, items, sessions });
+    },
+
+    async history(caller, orderId) {
+      if (!UUID_RE.test(orderId)) return err(notFound(orderId));
+      const order = await orders.findById(orderId);
+      if (!order) return err(notFound(orderId));
+      // Same visibility rule as get — hide existence from out-of-scope callers.
+      if (!canViewOrder(caller, order)) return err(notFound(orderId));
+      return audit.listByEntity({ type: 'order', id: orderId }, { limit: 100 });
     },
 
     async list(caller, query) {
