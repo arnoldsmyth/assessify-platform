@@ -7,7 +7,7 @@ import {
   type OrderItem,
   type RoleAssignment,
 } from '@assessify/domain';
-import type { NewOrderItem, OrderRepository } from '@assessify/repositories';
+import type { NewOrderItem, NewOrderSession, OrderRepository } from '@assessify/repositories';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuditService } from '../audit';
@@ -113,15 +113,17 @@ function fixtureOrder(overrides: Partial<Order> = {}): Order {
 function makeRepo(seed: Order[] = []) {
   const rows = new Map<string, Order>(seed.map((o) => [o.id, o]));
   const itemRows = new Map<string, OrderItem[]>();
+  const sessionRows = new Map<string, NewOrderSession[]>();
   let nextRef = 43;
   const repo: OrderRepository = {
-    async insert(order, items: NewOrderItem[]) {
+    async insert(order, items: NewOrderItem[], sessions: NewOrderSession[]) {
       const created: Order = { ...order, reference: `ORD-${String(nextRef++).padStart(5, '0')}` };
       rows.set(created.id, created);
       itemRows.set(
         created.id,
         items.map((item) => ({ ...item, orderId: created.id }))
       );
+      sessionRows.set(created.id, sessions);
       return created;
     },
     async findById(id) {
@@ -129,6 +131,25 @@ function makeRepo(seed: Order[] = []) {
     },
     async findItems(orderId) {
       return itemRows.get(orderId) ?? [];
+    },
+    async findSessions(orderId) {
+      return (sessionRows.get(orderId) ?? []).map((session) => ({
+        id: session.id,
+        orderId,
+        respondentId: session.respondent.id,
+        status: 'created' as const,
+        isFocal: true,
+        language: session.language,
+        invitedAt: null,
+        startedAt: null,
+        completedAt: null,
+        createdAt: session.createdAt,
+        respondent: {
+          email: session.respondent.email,
+          firstName: session.respondent.firstName,
+          lastName: session.respondent.lastName,
+        },
+      }));
     },
     async updateStatus(id, expectedStatus, patch) {
       const existing = rows.get(id);
@@ -150,7 +171,7 @@ function makeRepo(seed: Order[] = []) {
       return { items: items.slice(query.offset, query.offset + query.limit), total: items.length };
     },
   };
-  return { repo, rows };
+  return { repo, rows, sessionRows };
 }
 
 function makeAudit(): AuditService {
@@ -170,14 +191,22 @@ function makeAudit(): AuditService {
 }
 
 function makeService(seed: Order[] = []) {
-  const { repo, rows } = makeRepo(seed);
+  const { repo, rows, sessionRows } = makeRepo(seed);
   const audit = makeAudit();
   const service = createOrderService({
     orders: repo,
     audit,
     now: () => new Date('2026-07-14T12:00:00Z'),
   });
-  return { service, rows, audit };
+  return { service, rows, sessionRows, audit };
+}
+
+function respondent(n: number) {
+  return {
+    firstName: `First${n}`,
+    lastName: `Last${n}`,
+    email: `respondent${n}@example.com`,
+  };
 }
 
 function createInput(overrides: Record<string, unknown> = {}) {
@@ -188,6 +217,7 @@ function createInput(overrides: Record<string, unknown> = {}) {
     questionnaireVersionId: QV_ID,
     currency: 'EUR',
     items: [{ description: 'PRO-D assessment', unitPrice: 15000 }],
+    respondents: [respondent(1)],
     ...overrides,
   };
 }
@@ -222,6 +252,7 @@ describe('orderService.create', () => {
           { description: 'Assessment ×10', unitPrice: 12000, quantity: 10, discount: 20000 },
           { description: 'Assessment ×3', unitPrice: 12000, quantity: 3 },
         ],
+        respondents: Array.from({ length: 13 }, (_, i) => respondent(i + 1)),
       })
     );
     expect(result.ok).toBe(true);
@@ -235,11 +266,110 @@ describe('orderService.create', () => {
     const { service } = makeService();
     const result = await service.create(
       superAdmin,
-      createInput({ items: [{ description: 'x', unitPrice: 100, quantity: 2 }] })
+      createInput({
+        items: [{ description: 'x', unitPrice: 100, quantity: 2 }],
+        respondents: [respondent(1), respondent(2)],
+      })
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('order/validation');
+  });
+
+  it('creates one respondent session per respondent with UUIDv4 tokens and no PIN yet', async () => {
+    const { service, sessionRows } = makeService();
+    const created = await service.create(
+      superAdmin,
+      createInput({
+        type: 'bulk_named',
+        items: [{ description: 'Assessment ×3', unitPrice: 12000, quantity: 3 }],
+        respondents: [respondent(1), respondent(2), respondent(3)],
+      })
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const got = await service.get(superAdmin, created.value.id);
+    expect(got.ok).toBe(true);
+    if (!got.ok) return;
+    expect(got.value.sessions).toHaveLength(3);
+    for (const session of got.value.sessions) {
+      expect(session.status).toBe('created');
+      expect(session.isFocal).toBe(true);
+      // Language falls back to the order's report language.
+      expect(session.language).toBe('en');
+    }
+    expect(got.value.sessions.map((s) => s.respondent?.email)).toEqual([
+      'respondent1@example.com',
+      'respondent2@example.com',
+      'respondent3@example.com',
+    ]);
+
+    // Token rules (spec 05): UUIDv4 (random — version nibble 4), unique.
+    const stored = sessionRows.get(created.value.id) ?? [];
+    const tokens = stored.map((s) => s.token);
+    expect(new Set(tokens).size).toBe(3);
+    for (const token of tokens) {
+      expect(token).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      );
+    }
+  });
+
+  it('rejects a pricing/respondent mismatch (total quantity ≠ respondent count)', async () => {
+    const { service } = makeService();
+    const result = await service.create(
+      superAdmin,
+      createInput({
+        type: 'bulk_named',
+        items: [{ description: 'x', unitPrice: 100, quantity: 5 }],
+        respondents: [respondent(1), respondent(2)],
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('order/validation');
+  });
+
+  it('rejects duplicate respondent emails within one order', async () => {
+    const { service } = makeService();
+    const result = await service.create(
+      superAdmin,
+      createInput({
+        type: 'bulk_named',
+        items: [{ description: 'x', unitPrice: 100, quantity: 2 }],
+        respondents: [
+          respondent(1),
+          { ...respondent(2), email: 'RESPONDENT1@example.com' }, // case-insensitive dupe
+        ],
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('order/validation');
+  });
+
+  it('rejects invalid respondent rows at the validation boundary', async () => {
+    const { service } = makeService();
+    for (const bad of [
+      [],
+      [{ firstName: '', lastName: 'x', email: 'a@b.co' }],
+      [{ firstName: 'x', lastName: 'x', email: 'not-an-email' }],
+      [{ firstName: 'x', lastName: 'x', email: 'a@b.co', language: 'Not A Tag' }],
+    ]) {
+      const result = await service.create(superAdmin, createInput({ respondents: bad }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('order/validation');
+    }
+  });
+
+  it('audits a respondent count but never respondent PII', async () => {
+    const { service, audit } = makeService();
+    const result = await service.create(clientAdmin, createInput());
+    expect(result.ok).toBe(true);
+    const detail = vi.mocked(audit.record).mock.calls[0]?.[3];
+    expect(detail).toMatchObject({ respondentCount: 1 });
+    expect(JSON.stringify(detail)).not.toContain('respondent1@example.com');
+    expect(JSON.stringify(detail)).not.toContain('First1');
   });
 
   it('rejects order types not yet supported by D1', async () => {
@@ -551,5 +681,26 @@ describe('orderService.get / list', () => {
 
     const wrongScope = await service.list(clientAdmin, { clientId: OTHER_CLIENT_ID });
     expect(wrongScope.ok).toBe(false);
+  });
+});
+
+describe('orderService.history', () => {
+  it('returns the audit trail for viewable orders', async () => {
+    const { service, audit } = makeService([fixtureOrder()]);
+    vi.mocked(audit.listByEntity).mockResolvedValueOnce(ok({ items: [], hasMore: false }));
+    const result = await service.history(clientAdmin, ORDER_ID);
+    expect(result.ok).toBe(true);
+    expect(audit.listByEntity).toHaveBeenCalledWith(
+      { type: 'order', id: ORDER_ID },
+      { limit: 100 }
+    );
+  });
+
+  it('hides history from out-of-scope callers as not_found', async () => {
+    const { service, audit } = makeService([fixtureOrder()]);
+    const result = await service.history(otherClientAdmin, ORDER_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('order/not_found');
+    expect(audit.listByEntity).not.toHaveBeenCalled();
   });
 });

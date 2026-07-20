@@ -25,11 +25,18 @@ export {
   createOrderRepository,
   type NewOrder,
   type NewOrderItem,
+  type NewOrderRespondent,
+  type NewOrderSession,
   type OrderListQuery,
   type OrderPage,
   type OrderRepository,
   type OrderStatusPatch,
 } from './postgres/orders';
+export {
+  createClientRepository,
+  type ClientRepository,
+  type ClientSummary,
+} from './postgres/clients';
 export {
   createNotificationLogRepository,
   type NotificationLogCreate,

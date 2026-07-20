@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { languageTagSchema, reportPageSizeSchema } from '../products/product';
+import type { RespondentSessionStatus } from '../respondent-access/respondent-access';
 import { orderEventSchema } from './state-machine';
 import { orderStatusSchema, orderTypeSchema, type OrderStatus, type OrderType } from './order-status';
 
@@ -26,6 +27,36 @@ export type OrderReportModel = z.infer<typeof reportModelSchema>;
 
 export const orderPlacedViaSchema = z.enum(['admin', 'client', 'retail', 'api']);
 export type OrderPlacedVia = z.infer<typeof orderPlacedViaSchema>;
+
+// ---------------------------------------------------------------------------
+// Respondent capture (named / bulk_named — spec 06 wizard step 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One respondent row captured by the order wizard (spec 06: "named/bulk =
+ * respondent rows (first, last, email, language)"). PII: these values are
+ * only ever stored on `respondents` — never in URLs, logs, or audit detail.
+ */
+export const orderRespondentInputSchema = z
+  .object({
+    firstName: z.string().trim().min(1, 'Required').max(100),
+    lastName: z.string().trim().min(1, 'Required').max(100),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email('Must be a valid email address')
+      .max(320),
+    /** Invitation/questionnaire language; falls back to the order's report language. */
+    language: languageTagSchema.optional(),
+  })
+  .strict();
+
+export type OrderRespondentInput = z.input<typeof orderRespondentInputSchema>;
+export type OrderRespondent = z.output<typeof orderRespondentInputSchema>;
+
+/** Upper bound on respondents per bulk_named order (schema guardrail). */
+export const MAX_ORDER_RESPONDENTS = 500;
 
 // ---------------------------------------------------------------------------
 // Create payload
@@ -66,6 +97,14 @@ export const createOrderSchema = z
     reportModel: reportModelSchema.default('individual'),
     currency: currencyCodeSchema,
     items: z.array(orderItemInputSchema).min(1).max(200),
+    /**
+     * Respondents known at order time (spec 06: named = 1, bulk_named = N).
+     * One respondent session (token, PIN later at invitation) per row.
+     */
+    respondents: z
+      .array(orderRespondentInputSchema)
+      .min(1, 'At least one respondent is required')
+      .max(MAX_ORDER_RESPONDENTS),
     /** Order-level notification override (spec 13). */
     notificationPolicy: z.record(z.unknown()).nullable().default(null),
     /** Legacy 'silent mode' (partner API). */
@@ -78,12 +117,36 @@ export const createOrderSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    const respondentCount = value.items.reduce((sum, item) => sum + item.quantity, 0);
-    if (value.type === 'named' && respondentCount !== 1) {
+    const quantityTotal = value.items.reduce((sum, item) => sum + item.quantity, 0);
+    if (value.type === 'named' && quantityTotal !== 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['items'],
         message: 'A named order covers exactly one respondent (total quantity must be 1)',
+      });
+    }
+    if (value.type === 'named' && value.respondents.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['respondents'],
+        message: 'A named order covers exactly one respondent',
+      });
+    }
+    // Pricing lines are the paid seats — they must cover the captured
+    // respondents exactly (spec 06 pricing: total = Σ quantity × unit price).
+    if (quantityTotal !== value.respondents.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['respondents'],
+        message: `Total line quantity (${quantityTotal}) must equal the number of respondents (${value.respondents.length})`,
+      });
+    }
+    const emails = value.respondents.map((respondent) => respondent.email);
+    if (new Set(emails).size !== emails.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['respondents'],
+        message: 'Each respondent email must be unique within the order',
       });
     }
   });
@@ -175,6 +238,32 @@ export interface OrderItem {
   unitPrice: number;
   discount: number;
   quantity: number;
+}
+
+/**
+ * Admin-facing projection of one `respondent_sessions` row on an order,
+ * joined with the respondent's identity. PIN hash and token are deliberately
+ * absent (spec 05: PINs never displayed in admin UI; tokens only surface via
+ * the invitation flow, D5).
+ */
+export interface OrderSessionSummary {
+  id: string;
+  orderId: string;
+  respondentId: string | null;
+  /** Mirrors the `session_status` pg enum (spec 04). */
+  status: RespondentSessionStatus;
+  isFocal: boolean;
+  language: string | null;
+  invitedAt: Date | null;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  /** Null when the respondent was erased (PII deletion nulls the fields). */
+  respondent: {
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
 }
 
 /** Key under which the held order's prior status lives in `error_detail`. */

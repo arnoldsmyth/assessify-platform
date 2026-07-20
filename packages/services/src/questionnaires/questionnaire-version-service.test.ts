@@ -506,3 +506,44 @@ describe('questionnaireVersionService.listByProduct', () => {
     if (!missing.ok) expect(missing.error.code).toBe('questionnaire_version/product_not_found');
   });
 });
+
+describe('questionnaireVersionService.listActiveForOrdering', () => {
+  it('returns only active versions as a slim projection, to order placers too', async () => {
+    const retired = fixtureVersion({
+      id: '018a0000-0000-7000-8000-000000000001',
+      version: 1,
+      status: 'retired',
+    });
+    const activeSelf = fixtureVersion({
+      id: '018a0000-0000-7000-8000-000000000002',
+      version: 2,
+      status: 'active',
+    });
+    const draft = fixtureVersion({
+      id: '018a0000-0000-7000-8000-000000000003',
+      version: 3,
+      status: 'draft',
+    });
+    const { service } = makeService([retired, activeSelf, draft]);
+
+    // clientAdmin cannot manage versions but CAN place orders (spec 05).
+    for (const caller of [superAdmin, productAdmin, clientAdmin]) {
+      const result = await service.listActiveForOrdering(caller, PRODUCT_ID);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual([{ id: activeSelf.id, version: 2, variant: 'self' }]);
+      }
+    }
+  });
+
+  it('denies callers who can neither manage the product nor place orders', async () => {
+    const { service } = makeService([fixtureVersion({ status: 'active' })]);
+    const denied = await service.listActiveForOrdering(otherProductAdmin, PRODUCT_ID);
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.error.code).toBe('questionnaire_version/forbidden');
+
+    const missing = await service.listActiveForOrdering(superAdmin, OTHER_PRODUCT_ID);
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error.code).toBe('questionnaire_version/product_not_found');
+  });
+});
