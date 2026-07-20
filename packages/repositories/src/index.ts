@@ -27,6 +27,11 @@ export {
   type OrderStatusPatch,
 } from './postgres/orders';
 export {
+  createNotificationLogRepository,
+  type NotificationLogCreate,
+  type NotificationLogRepository,
+} from './postgres/notification-log';
+export {
   createRoleAssignmentRepository,
   type RoleAssignmentRepository,
 } from './postgres/role-assignments';

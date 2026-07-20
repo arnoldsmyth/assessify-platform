@@ -9,7 +9,10 @@
     "./pdf/weasyprint": "./src/pdf/providers/weasyprint.ts",
     "./mailer/console": "./src/mailer/providers/console.ts",
     "./storage/spaces": "./src/storage/providers/spaces.ts",
-    "./storage/memory": "./src/storage/providers/memory.ts"
+    "./storage/memory": "./src/storage/providers/memory.ts",
+    "./mailer/memory": "./src/mailer/providers/memory.ts",
+    "./mailer/sendgrid": "./src/mailer/providers/sendgrid.ts",
+    "./mailer/sendgrid-webhook": "./src/mailer/providers/sendgrid-webhook.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -18,7 +21,8 @@
   "dependencies": {
     "@assessify/domain": "workspace:*",
     "bullmq": "^5.34.0",
-    "ioredis": "5.10.1"
+    "ioredis": "5.10.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

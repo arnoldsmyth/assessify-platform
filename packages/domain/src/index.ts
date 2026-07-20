@@ -3,6 +3,7 @@ export * from './caller-context';
 export * from './errors';
 export * from './jobs';
 export * from './orders';
+export * from './notifications';
 export * from './products';
 export * from './respondent-access';
 export * from './responses';
