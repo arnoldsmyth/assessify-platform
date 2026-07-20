@@ -4,5 +4,6 @@ export * from './errors';
 export * from './jobs';
 export * from './orders';
 export * from './products';
+export * from './respondent-access';
 export * from './result';
 export * from './uuid';

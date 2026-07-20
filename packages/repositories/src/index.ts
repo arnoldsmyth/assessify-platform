@@ -29,6 +29,15 @@ export {
   createRoleAssignmentRepository,
   type RoleAssignmentRepository,
 } from './postgres/role-assignments';
+export {
+  createRespondentSessionRepository,
+  type RespondentSessionRepository,
+} from './postgres/respondent-sessions';
+export {
+  createInMemoryPinAttemptStore,
+  type PinAttemptState,
+  type PinAttemptStore,
+} from './respondent-access/pin-attempt-store';
 
 export type {
   ProductListQuery,
