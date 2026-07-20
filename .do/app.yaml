@@ -69,6 +69,10 @@ services:
         value: ${valkey.DATABASE_URL}
       - key: SENTRY_DSN
         type: SECRET
+      - key: STRIPE_SECRET_KEY
+        type: SECRET
+      - key: STRIPE_WEBHOOK_SECRET
+        type: SECRET
       # Tenant resolution (F1, spec 11)
       - key: ADMIN_HOSTNAMES
         value: app.assessify.ie
