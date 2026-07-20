@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 // Unit tests for controller-layer helpers that are deliberately pure (tenant
-// routing policy, tenant header codec, branding CSS builder) — no Next.js
-// runtime involved.
+// routing policy, tenant header codec, branding CSS builder, admin form
+// parsers) — no Next.js runtime involved.
 export default defineConfig({
   resolve: {
     alias: {
@@ -12,6 +12,6 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['lib/**/*.test.ts'],
+    include: ['lib/**/*.test.ts', 'app/**/*.test.ts'],
   },
 });
