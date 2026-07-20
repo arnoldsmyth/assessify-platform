@@ -1,8 +1,9 @@
-// Postgres (Drizzle) repositories. Response-store (jsonb) repositories land with A4.
+// Postgres (Drizzle) repositories.
 import { createDb } from '@assessify/db';
 
 import { DrizzleProductRepository } from './products/drizzle-product-repository';
 import type { ProductRepository } from './products/product-repository';
+import { DrizzleResponseRepository, type ResponseRepository } from './postgres/responses';
 
 export * from './audit-log';
 export { getDbHandle } from './postgres/client';
@@ -10,6 +11,11 @@ export {
   createRoleAssignmentRepository,
   type RoleAssignmentRepository,
 } from './postgres/role-assignments';
+export {
+  createResponseRepository,
+  DrizzleResponseRepository,
+  type ResponseRepository,
+} from './postgres/responses';
 
 export type {
   ProductListQuery,
@@ -21,6 +27,8 @@ export { DrizzleProductRepository } from './products/drizzle-product-repository'
 
 export interface Repositories {
   products: ProductRepository;
+  /** Questionnaire response store (Neon jsonb — A4). */
+  responses: ResponseRepository;
   /** Drain the underlying pg pool (worker/app shutdown). */
   close(): Promise<void>;
 }
@@ -35,6 +43,7 @@ export function createRepositories(connectionString: string): Repositories {
   const { db, pool } = createDb(connectionString);
   return {
     products: new DrizzleProductRepository(db),
+    responses: new DrizzleResponseRepository(db),
     close: async () => {
       await pool.end();
     },

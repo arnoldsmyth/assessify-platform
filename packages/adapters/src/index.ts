@@ -4,3 +4,4 @@
 export * from './mailer/types';
 export * from './pdf/types';
 export * from './queue/types';
+export * from './storage/types';
