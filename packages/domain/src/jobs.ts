@@ -13,6 +13,8 @@
  */
 import { z } from 'zod';
 
+import { notificationRequestSchema } from './notifications';
+
 /**
  * Trivial round-trip job proving the queue wiring end to end: enqueued via
  * the JobQueue adapter, processed by the worker's health-ping processor,
@@ -32,10 +34,27 @@ export const healthPingPayloadSchema = z.object({
  */
 export const heartbeatPayloadSchema = z.object({});
 
+/**
+ * Async notification send (spec 13: every send goes through the worker —
+ * no emails from request handlers). The notification service writes the
+ * `notification_log` row (`queued`) and enqueues this job; the worker
+ * processor hands the payload back to the service for delivery.
+ *
+ * The payload carries the full message (recipient included) because
+ * `notification_log` intentionally stores no template data; Valkey holds it
+ * only transiently while the job is in flight. Never log the payload.
+ */
+export const notificationSendPayloadSchema = z.object({
+  /** `notification_log.id` created by the enqueuing service (also the dedupe key). */
+  notificationId: z.string().uuid(),
+  message: notificationRequestSchema,
+});
+
 /** Single source of truth mapping job name → payload schema. */
 export const jobPayloadSchemas = {
   'health.ping': healthPingPayloadSchema,
   'maintenance.heartbeat': heartbeatPayloadSchema,
+  'notifications.send': notificationSendPayloadSchema,
 } as const;
 
 export type JobName = keyof typeof jobPayloadSchemas;

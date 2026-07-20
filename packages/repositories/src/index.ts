@@ -7,6 +7,11 @@ import type { ProductRepository } from './products/product-repository';
 export * from './audit-log';
 export { getDbHandle } from './postgres/client';
 export {
+  createNotificationLogRepository,
+  type NotificationLogCreate,
+  type NotificationLogRepository,
+} from './postgres/notification-log';
+export {
   createRoleAssignmentRepository,
   type RoleAssignmentRepository,
 } from './postgres/role-assignments';

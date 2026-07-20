@@ -29,7 +29,10 @@ describe.runIf(connectionUrl !== undefined)('queue round trip (integration)', ()
   beforeAll(() => {
     connection = new IORedis(connectionUrl as string, { maxRetriesPerRequest: null });
     queue = new Queue(queueName, { connection });
-    registry = createProcessorRegistry({ health: { getHealth } });
+    registry = createProcessorRegistry({
+      health: { getHealth },
+      notifications: { service: undefined },
+    });
     worker = new Worker(queueName, (job) => dispatchJob(registry, job), { connection });
   });
 

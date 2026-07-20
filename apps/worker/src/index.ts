@@ -18,12 +18,15 @@
  */
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { getHealth } from '@assessify/services';
+import { getHealth, getNotificationService } from '@assessify/services';
+import type { Mailer } from '@assessify/adapters';
 import {
   ASSESSIFY_QUEUE_NAME,
   BullMqJobQueue,
   defaultJobOptions,
 } from '@assessify/adapters/queue/bullmq';
+import { createConsoleMailer } from '@assessify/adapters/mailer/console';
+import { createSendGridMailer } from '@assessify/adapters/mailer/sendgrid';
 import { loadWorkerEnv } from './env';
 import { dispatchJob } from './dispatch';
 import { createProcessorRegistry } from './processors';
@@ -40,7 +43,27 @@ async function main(): Promise<void> {
   });
 
   const queue = new Queue(ASSESSIFY_QUEUE_NAME, { connection, defaultJobOptions });
-  const registry = createProcessorRegistry({ health: { getHealth } });
+  const jobQueue = new BullMqJobQueue({ queue });
+
+  // Composition root: concrete Mailer provider chosen here, injected into the
+  // service — nothing below the composition root knows which one it got.
+  const mailer: Mailer = env.sendgridApiKey
+    ? createSendGridMailer({ apiKey: env.sendgridApiKey })
+    : createConsoleMailer();
+  if (!env.sendgridApiKey) {
+    console.log('[worker] SENDGRID_API_KEY not set — using console mailer (dev only)');
+  }
+  const notifications = env.databaseUrl
+    ? getNotificationService({ mailer, queue: jobQueue })
+    : undefined;
+  if (!env.databaseUrl) {
+    console.log('[worker] DATABASE_URL not set — notifications.send jobs will fail');
+  }
+
+  const registry = createProcessorRegistry({
+    health: { getHealth },
+    notifications: { service: notifications },
+  });
   const worker = new Worker(ASSESSIFY_QUEUE_NAME, (job) => dispatchJob(registry, job), {
     connection,
     concurrency: env.concurrency,
@@ -59,7 +82,6 @@ async function main(): Promise<void> {
   await registerRepeatableJobs(queue);
 
   // Boot-time demo round trip via the adapter interface (see module docs).
-  const jobQueue = new BullMqJobQueue({ queue });
   await jobQueue.enqueue('health.ping', {
     requestedAt: new Date().toISOString(),
     source: 'worker-boot',

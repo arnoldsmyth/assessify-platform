@@ -16,6 +16,17 @@ const envSchema = z
     REDIS_URL: queueUrl.optional(),
     /** Max jobs processed concurrently by this worker process. */
     WORKER_CONCURRENCY: z.coerce.number().int().positive().max(100).default(5),
+    /**
+     * Neon Postgres connection string — required for jobs that touch the
+     * database (notifications.send). Optional so a queue-only dev worker
+     * still boots; DB-dependent processors fail their jobs when unset.
+     */
+    DATABASE_URL: z.string().url().optional(),
+    /**
+     * SendGrid API key (spec 13). When unset, the worker falls back to the
+     * console mailer (dev only — emails are printed, not sent).
+     */
+    SENDGRID_API_KEY: z.string().min(1).optional(),
   })
   .refine((env) => env.VALKEY_URL !== undefined || env.REDIS_URL !== undefined, {
     message:
@@ -25,6 +36,8 @@ const envSchema = z
 export interface WorkerEnv {
   connectionUrl: string;
   concurrency: number;
+  databaseUrl?: string;
+  sendgridApiKey?: string;
 }
 
 export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEnv {
@@ -40,5 +53,12 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     // Unreachable (the refine above guarantees one is set) — narrows the type.
     throw new Error('[worker] invalid environment: no queue connection URL');
   }
-  return { connectionUrl, concurrency: parsed.data.WORKER_CONCURRENCY };
+  return {
+    connectionUrl,
+    concurrency: parsed.data.WORKER_CONCURRENCY,
+    ...(parsed.data.DATABASE_URL !== undefined && { databaseUrl: parsed.data.DATABASE_URL }),
+    ...(parsed.data.SENDGRID_API_KEY !== undefined && {
+      sendgridApiKey: parsed.data.SENDGRID_API_KEY,
+    }),
+  };
 }

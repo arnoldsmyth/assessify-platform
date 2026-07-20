@@ -34,9 +34,12 @@ function createAuth() {
         sendMagicLink: async ({ email, url }) => {
           await mailer.send({
             to: email,
+            from: { name: env.MAIL_FROM_NAME, address: env.MAIL_FROM_ADDRESS },
             subject: 'Sign in to Assessify',
-            html: `<p><a href="${url}">Sign in to Assessify</a></p><p>This link expires shortly and can be used once.</p>`,
-            text: `Sign in to Assessify: ${url}`,
+            content: {
+              html: `<p><a href="${url}">Sign in to Assessify</a></p><p>This link expires shortly and can be used once.</p>`,
+              text: `Sign in to Assessify: ${url}`,
+            },
           });
         },
       }),
