@@ -13,7 +13,9 @@
   "dependencies": {
     "@assessify/adapters": "workspace:*",
     "@assessify/domain": "workspace:*",
-    "@assessify/repositories": "workspace:*"
+    "@assessify/questionnaire-schema": "workspace:*",
+    "@assessify/repositories": "workspace:*",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "typescript": "^5.8.0",
