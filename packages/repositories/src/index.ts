@@ -32,6 +32,11 @@ export {
   type NotificationLogRepository,
 } from './postgres/notification-log';
 export {
+  createCustomDomainRepository,
+  type ActiveCustomDomain,
+  type CustomDomainRepository,
+} from './postgres/custom-domains';
+export {
   createRoleAssignmentRepository,
   type RoleAssignmentRepository,
 } from './postgres/role-assignments';

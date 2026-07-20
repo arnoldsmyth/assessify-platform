@@ -6,3 +6,4 @@ export * from './notifications';
 export * from './products';
 export * from './questionnaires';
 export * from './respondent-access';
+export * from './tenants';
