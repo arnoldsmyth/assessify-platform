@@ -1,0 +1,128 @@
+# DigitalOcean App Platform spec — PRODUCTION (docs/spec/03-architecture.md topology).
+# One DO App, four components: web (Next.js) ×2, worker (BullMQ) ×1,
+# pdf-service (WeasyPrint, internal-only) ×1, managed Valkey attached.
+#
+# Create:  doctl apps create --spec .do/app.yaml
+# Update:  doctl apps update <app-id> --spec .do/app.yaml
+# Deploys: production deploys are triggered from CI on a version tag
+#          (deploy_on_push is false here; staging tracks main — see app.staging.yaml).
+#
+# Secrets marked type: SECRET must be set once in the DO console or via
+# `doctl apps update` with values; they are encrypted at rest. Values here are
+# placeholders only — never commit real credentials.
+
+name: assessify-prod
+region: ams # closest App Platform region to IE
+
+domains:
+  - domain: app.assessify.ie
+    type: PRIMARY
+  # Product slug subdomains ({slug}.assessify.ie) and client custom domains
+  # (e.g. questionnaire.pro-d.com) are added dynamically via the DO API in F2 —
+  # not statically listed here.
+
+services:
+  - name: web
+    github:
+      repo: arnoldsmyth/assessify-platform
+      branch: main
+      deploy_on_push: false
+    build_command: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @assessify/web build
+    run_command: pnpm --filter @assessify/web start
+    environment_slug: node-js
+    http_port: 3000
+    instance_count: 2
+    instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      http_path: /api/v1/health
+      initial_delay_seconds: 10
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        type: SECRET
+      - key: BETTER_AUTH_SECRET
+        type: SECRET
+      - key: BETTER_AUTH_URL
+        value: https://app.assessify.ie
+      - key: RESPONDENT_SESSION_SECRET
+        type: SECRET
+      - key: SENDGRID_WEBHOOK_PUBLIC_KEY
+        type: SECRET
+      - key: MAIL_FROM_NAME
+        value: Assessify
+      - key: MAIL_FROM_ADDRESS
+        value: no-reply@assessify.ie
+      - key: DO_SPACES_REGION
+        value: ams3
+      - key: DO_SPACES_BUCKET
+        value: assessify-prod
+      - key: DO_SPACES_KEY
+        type: SECRET
+      - key: DO_SPACES_SECRET
+        type: SECRET
+      - key: PDF_SERVICE_URL
+        value: http://pdf-service:8080
+      - key: PDF_SERVICE_SHARED_SECRET
+        type: SECRET
+      - key: VALKEY_URL
+        value: ${valkey.DATABASE_URL}
+      - key: SENTRY_DSN
+        type: SECRET
+
+  # Internal-only component: no routes, reachable as http://pdf-service:8080
+  # from web/worker over the app's private network (docs/spec/09).
+  - name: pdf-service
+    dockerfile_path: apps/pdf-service/Dockerfile
+    source_dir: /
+    github:
+      repo: arnoldsmyth/assessify-platform
+      branch: main
+      deploy_on_push: false
+    internal_ports:
+      - 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    envs:
+      - key: PDF_SERVICE_SHARED_SECRET
+        type: SECRET
+
+workers:
+  - name: worker
+    github:
+      repo: arnoldsmyth/assessify-platform
+      branch: main
+      deploy_on_push: false
+    build_command: corepack enable && pnpm install --frozen-lockfile
+    run_command: pnpm --filter @assessify/worker start
+    environment_slug: node-js
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        type: SECRET
+      - key: VALKEY_URL
+        value: ${valkey.DATABASE_URL}
+      - key: SENDGRID_API_KEY
+        type: SECRET
+      - key: PDF_SERVICE_URL
+        value: http://pdf-service:8080
+      - key: PDF_SERVICE_SHARED_SECRET
+        type: SECRET
+      - key: SENTRY_DSN
+        type: SECRET
+
+databases:
+  # DO Managed Valkey — BullMQ backing store ONLY, never a data store (spec 03).
+  # production: true attaches an existing managed cluster named below
+  # (create it first: doctl databases create assessify-valkey --engine valkey ...).
+  - name: valkey
+    engine: VALKEY
+    production: true
+    cluster_name: assessify-valkey
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
