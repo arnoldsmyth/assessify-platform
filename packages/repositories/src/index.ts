@@ -41,6 +41,12 @@ export {
   type CustomDomainRepository,
 } from './postgres/custom-domains';
 export {
+  createPaymentRepository,
+  type PaymentCreate,
+  type PaymentRepository,
+  type PaymentStatusPatch,
+} from './postgres/payments';
+export {
   createRoleAssignmentRepository,
   type RoleAssignmentRepository,
 } from './postgres/role-assignments';

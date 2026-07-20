@@ -3,6 +3,7 @@ export * from './auth/caller-context';
 export * from './health';
 export * from './orders';
 export * from './notifications';
+export * from './payments';
 export * from './products';
 export * from './questionnaire-session';
 export * from './questionnaires';

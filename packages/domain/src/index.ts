@@ -4,6 +4,7 @@ export * from './errors';
 export * from './jobs';
 export * from './orders';
 export * from './notifications';
+export * from './payments';
 export * from './products';
 export * from './respondent-access';
 export * from './responses';

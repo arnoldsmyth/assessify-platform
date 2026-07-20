@@ -137,6 +137,10 @@ function makeRepo(seed: Order[] = []) {
       rows.set(id, updated);
       return updated;
     },
+    async setPaymentProvider(id, provider) {
+      const existing = rows.get(id);
+      if (existing) rows.set(id, { ...existing, paymentProvider: provider });
+    },
     async list(query) {
       let items = [...rows.values()];
       if (query.clientId) items = items.filter((o) => o.clientId === query.clientId);
