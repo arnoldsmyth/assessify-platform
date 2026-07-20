@@ -5,5 +5,6 @@ export * from './jobs';
 export * from './orders';
 export * from './products';
 export * from './respondent-access';
+export * from './responses';
 export * from './result';
 export * from './uuid';

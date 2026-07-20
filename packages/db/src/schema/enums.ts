@@ -65,6 +65,13 @@ export const ledgerEntryType = pgEnum('ledger_entry_type', [
 
 export const reportModel = pgEnum('report_model', ['individual', 'aggregate', 'both']);
 
+/**
+ * Response-store status (A4 re-scope: Neon jsonb replaces Firestore). A
+ * response is `draft` while in progress and becomes `submitted` exactly once;
+ * answers are immutable after submit.
+ */
+export const responseStatus = pgEnum('response_status', ['draft', 'submitted']);
+
 export const scoringMode = pgEnum('scoring_mode', ['sync_internal', 'async_external']);
 
 export const royaltyMethod = pgEnum('royalty_method', [

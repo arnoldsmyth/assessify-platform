@@ -1,0 +1,288 @@
+import { createHash, createHmac } from 'node:crypto';
+
+import {
+  StorageError,
+  type ObjectStorage,
+  type SignedUrlInput,
+  type StorageObject,
+  type StorageUploadInput,
+} from '../types';
+
+/**
+ * DigitalOcean Spaces provider (S3-compatible REST API, virtual-hosted style)
+ * with hand-rolled AWS Signature v4 over node:crypto — no AWS SDK dependency.
+ * Verified against the published AWS SigV4 test vectors (see spaces.test.ts).
+ */
+
+export interface SpacesStorageConfig {
+  /** e.g. 'ams3', 'fra1' — becomes {region}.digitaloceanspaces.com. */
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  /**
+   * Origin override for tests or other S3-compatibles
+   * (default `https://{region}.digitaloceanspaces.com`).
+   */
+  endpoint?: string;
+  /** Injectable for tests. */
+  fetchFn?: typeof fetch;
+  /** Injectable for deterministic signatures in tests. */
+  clock?: () => Date;
+}
+
+/**
+ * Build a SpacesStorageConfig from environment variables (composition roots
+ * only). Throws StorageError naming the missing variables — never their values.
+ */
+export function spacesConfigFromEnv(
+  env: Record<string, string | undefined> = process.env
+): SpacesStorageConfig {
+  const required = {
+    region: env['DO_SPACES_REGION'],
+    bucket: env['DO_SPACES_BUCKET'],
+    accessKeyId: env['DO_SPACES_KEY'],
+    secretAccessKey: env['DO_SPACES_SECRET'],
+  };
+  const missing = Object.entries({
+    DO_SPACES_REGION: required.region,
+    DO_SPACES_BUCKET: required.bucket,
+    DO_SPACES_KEY: required.accessKeyId,
+    DO_SPACES_SECRET: required.secretAccessKey,
+  })
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missing.length > 0) {
+    throw new StorageError(`Missing Spaces configuration: ${missing.join(', ')}`);
+  }
+  return {
+    region: required.region as string,
+    bucket: required.bucket as string,
+    accessKeyId: required.accessKeyId as string,
+    secretAccessKey: required.secretAccessKey as string,
+    endpoint: env['DO_SPACES_ENDPOINT'],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SigV4 primitives
+// ---------------------------------------------------------------------------
+
+const ALGORITHM = 'AWS4-HMAC-SHA256';
+const UNSIGNED_PAYLOAD = 'UNSIGNED-PAYLOAD';
+const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
+
+function sha256Hex(data: string | Uint8Array): string {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+function hmac(key: string | Buffer, data: string): Buffer {
+  return createHmac('sha256', key).update(data, 'utf8').digest();
+}
+
+/** AWS canonical URI-encoding (RFC 3986, uppercase hex, '/' optionally kept). */
+function uriEncode(input: string, encodeSlash: boolean): string {
+  let out = '';
+  for (const ch of input) {
+    if (UNRESERVED.test(ch) || (!encodeSlash && ch === '/')) {
+      out += ch;
+    } else {
+      for (const byte of Buffer.from(ch, 'utf8')) {
+        out += `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+      }
+    }
+  }
+  return out;
+}
+
+/** 20130524T000000Z */
+function toAmzDate(date: Date): string {
+  return date
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
+}
+
+function signingKey(secret: string, dateStamp: string, region: string): Buffer {
+  const kDate = hmac(`AWS4${secret}`, dateStamp);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, 's3');
+  return hmac(kService, 'aws4_request');
+}
+
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
+
+export class SpacesStorage implements ObjectStorage {
+  private readonly host: string;
+  private readonly protocol: string;
+  private readonly fetchFn: typeof fetch;
+  private readonly clock: () => Date;
+
+  constructor(private readonly config: SpacesStorageConfig) {
+    const endpoint = new URL(
+      config.endpoint ?? `https://${config.region}.digitaloceanspaces.com`
+    );
+    this.host = `${config.bucket}.${endpoint.host}`;
+    this.protocol = endpoint.protocol;
+    this.fetchFn = config.fetchFn ?? fetch;
+    this.clock = config.clock ?? (() => new Date());
+  }
+
+  async upload(input: StorageUploadInput): Promise<void> {
+    const extraHeaders: Record<string, string> = {};
+    if (input.contentType) extraHeaders['content-type'] = input.contentType;
+    if (input.cacheControl) extraHeaders['cache-control'] = input.cacheControl;
+
+    const response = await this.send('PUT', input.key, {
+      body: input.body,
+      extraHeaders,
+    });
+    if (!response.ok) {
+      throw await this.responseError('upload', input.key, response);
+    }
+  }
+
+  async download(key: string): Promise<StorageObject | null> {
+    const response = await this.send('GET', key, {});
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw await this.responseError('download', key, response);
+    }
+    return {
+      body: new Uint8Array(await response.arrayBuffer()),
+      contentType: response.headers.get('content-type') ?? undefined,
+    };
+  }
+
+  async signedUrl(input: SignedUrlInput): Promise<string> {
+    const method = input.method ?? 'GET';
+    const expiresInSeconds = input.expiresInSeconds ?? 900;
+    const now = this.clock();
+    const amzDate = toAmzDate(now);
+    const dateStamp = amzDate.slice(0, 8);
+    const scope = `${dateStamp}/${this.config.region}/s3/aws4_request`;
+    const canonicalUri = `/${uriEncode(input.key, false)}`;
+
+    const query: [string, string][] = [
+      ['X-Amz-Algorithm', ALGORITHM],
+      ['X-Amz-Credential', `${this.config.accessKeyId}/${scope}`],
+      ['X-Amz-Date', amzDate],
+      ['X-Amz-Expires', String(expiresInSeconds)],
+      ['X-Amz-SignedHeaders', 'host'],
+    ];
+    const canonicalQuery = query
+      .map(([name, value]) => [uriEncode(name, true), uriEncode(value, true)] as const)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([name, value]) => `${name}=${value}`)
+      .join('&');
+
+    const canonicalRequest = [
+      method,
+      canonicalUri,
+      canonicalQuery,
+      `host:${this.host}\n`,
+      'host',
+      UNSIGNED_PAYLOAD,
+    ].join('\n');
+
+    const stringToSign = [ALGORITHM, amzDate, scope, sha256Hex(canonicalRequest)].join('\n');
+    const signature = createHmac(
+      'sha256',
+      signingKey(this.config.secretAccessKey, dateStamp, this.config.region)
+    )
+      .update(stringToSign, 'utf8')
+      .digest('hex');
+
+    return (
+      `${this.protocol}//${this.host}${canonicalUri}` +
+      `?${canonicalQuery}&X-Amz-Signature=${signature}`
+    );
+  }
+
+  async delete(key: string): Promise<void> {
+    const response = await this.send('DELETE', key, {});
+    // Idempotent per the adapter contract: a missing key is not an error.
+    if (!response.ok && response.status !== 404) {
+      throw await this.responseError('delete', key, response);
+    }
+  }
+
+  // -- internals ----------------------------------------------------------
+
+  /** Header-signed (SigV4) request to the object endpoint. */
+  private async send(
+    method: 'GET' | 'PUT' | 'DELETE',
+    key: string,
+    options: { body?: Uint8Array; extraHeaders?: Record<string, string> }
+  ): Promise<Response> {
+    const now = this.clock();
+    const amzDate = toAmzDate(now);
+    const dateStamp = amzDate.slice(0, 8);
+    const scope = `${dateStamp}/${this.config.region}/s3/aws4_request`;
+    const canonicalUri = `/${uriEncode(key, false)}`;
+    const payloadHash = sha256Hex(options.body ?? '');
+
+    // All request headers are signed. 'host' participates in the signature
+    // but is set by fetch from the URL (it is a forbidden request header).
+    const headers: Record<string, string> = {
+      host: this.host,
+      'x-amz-content-sha256': payloadHash,
+      'x-amz-date': amzDate,
+    };
+    for (const [name, value] of Object.entries(options.extraHeaders ?? {})) {
+      headers[name.toLowerCase()] = value;
+    }
+    const signedHeaderNames = Object.keys(headers).sort();
+    const canonicalHeaders = signedHeaderNames
+      .map((name) => `${name}:${headers[name]?.trim() ?? ''}\n`)
+      .join('');
+    const signedHeaders = signedHeaderNames.join(';');
+
+    const canonicalRequest = [
+      method,
+      canonicalUri,
+      '',
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash,
+    ].join('\n');
+    const stringToSign = [ALGORITHM, amzDate, scope, sha256Hex(canonicalRequest)].join('\n');
+    const signature = createHmac(
+      'sha256',
+      signingKey(this.config.secretAccessKey, dateStamp, this.config.region)
+    )
+      .update(stringToSign, 'utf8')
+      .digest('hex');
+
+    const requestHeaders: Record<string, string> = { ...headers };
+    delete requestHeaders['host'];
+    requestHeaders['authorization'] =
+      `${ALGORITHM} Credential=${this.config.accessKeyId}/${scope}, ` +
+      `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+    try {
+      return await this.fetchFn(`${this.protocol}//${this.host}${canonicalUri}`, {
+        method,
+        headers: requestHeaders,
+        body: options.body,
+      });
+    } catch (cause) {
+      throw new StorageError(`Spaces ${method} request failed`, { key, cause });
+    }
+  }
+
+  private async responseError(
+    operation: string,
+    key: string,
+    response: Response
+  ): Promise<StorageError> {
+    // S3 error bodies are XML without secrets; truncate defensively.
+    const body = (await response.text().catch(() => '')).slice(0, 500);
+    return new StorageError(
+      `Spaces ${operation} failed with status ${response.status}${body ? `: ${body}` : ''}`,
+      { key, statusCode: response.status }
+    );
+  }
+}

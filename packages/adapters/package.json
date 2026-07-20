@@ -7,7 +7,9 @@
     ".": "./src/index.ts",
     "./queue/bullmq": "./src/queue/providers/bullmq.ts",
     "./pdf/weasyprint": "./src/pdf/providers/weasyprint.ts",
-    "./mailer/console": "./src/mailer/providers/console.ts"
+    "./mailer/console": "./src/mailer/providers/console.ts",
+    "./storage/spaces": "./src/storage/providers/spaces.ts",
+    "./storage/memory": "./src/storage/providers/memory.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
