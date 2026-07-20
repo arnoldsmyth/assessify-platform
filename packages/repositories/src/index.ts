@@ -8,6 +8,10 @@ import {
 import { DrizzleProductRepository } from './products/drizzle-product-repository';
 import type { ProductRepository } from './products/product-repository';
 import { DrizzleResponseRepository, type ResponseRepository } from './postgres/responses';
+import {
+  createTranslationStringRepository,
+  type TranslationStringRepository,
+} from './postgres/translation-strings';
 
 export * from './audit-log';
 export { getDbHandle } from './postgres/client';
@@ -49,6 +53,10 @@ export {
   DrizzleResponseRepository,
   type ResponseRepository,
 } from './postgres/responses';
+export {
+  createTranslationStringRepository,
+  type TranslationStringRepository,
+} from './postgres/translation-strings';
 
 export type {
   ProductListQuery,
@@ -63,6 +71,8 @@ export interface Repositories {
   questionnaireVersions: QuestionnaireVersionRepository;
   /** Questionnaire response store (Neon jsonb — A4). */
   responses: ResponseRepository;
+  /** Translation strings per product+language (B4). */
+  translationStrings: TranslationStringRepository;
   /** Drain the underlying pg pool (worker/app shutdown). */
   close(): Promise<void>;
 }
@@ -79,6 +89,7 @@ export function createRepositories(connectionString: string): Repositories {
     products: new DrizzleProductRepository(db),
     questionnaireVersions: createQuestionnaireVersionRepository(db),
     responses: new DrizzleResponseRepository(db),
+    translationStrings: createTranslationStringRepository(db),
     close: async () => {
       await pool.end();
     },

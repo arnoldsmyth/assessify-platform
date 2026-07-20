@@ -7,5 +7,6 @@ export * from './notifications';
 export * from './products';
 export * from './respondent-access';
 export * from './responses';
+export * from './translations';
 export * from './result';
 export * from './uuid';
