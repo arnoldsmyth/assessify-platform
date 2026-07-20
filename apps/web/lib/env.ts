@@ -7,6 +7,17 @@ import { z } from 'zod';
  *
  * All variables are documented in the repo-root `.env.example`.
  */
+/** Comma-separated hostname list → normalised (trimmed, lowercased) array. */
+const hostListSchema = z
+  .string()
+  .transform((value) =>
+    value
+      .split(',')
+      .map((host) => host.trim().toLowerCase())
+      .filter((host) => host.length > 0)
+  )
+  .pipe(z.array(z.string().min(1)).min(1, 'At least one hostname is required'));
+
 const serverEnvSchema = z.object({
   /** Neon Postgres connection string (Better Auth + repositories). */
   DATABASE_URL: z.string().url(),
@@ -24,6 +35,19 @@ const serverEnvSchema = z.object({
   MAIL_FROM_NAME: z.string().min(1).default('Assessify'),
   MAIL_FROM_ADDRESS: z.string().email().default('no-reply@assessify.local'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  /**
+   * Tenant resolution (spec 11 / F1). Hostnames serving the Assessify admin
+   * surface; localhost variants keep every surface reachable in dev.
+   */
+  ADMIN_HOSTNAMES: hostListSchema.default('app.assessify.ie,localhost,127.0.0.1'),
+  /** Platform marketing/public apex hostnames. */
+  PLATFORM_HOSTNAMES: hostListSchema.default('assessify.ie,www.assessify.ie'),
+  /**
+   * Base domains that serve `{product-slug}.` subdomains. `localhost` is
+   * included so `pro-d.localhost:3000` exercises the white-label path in dev
+   * (browsers resolve *.localhost to loopback without /etc/hosts edits).
+   */
+  PRODUCT_SLUG_BASE_DOMAINS: hostListSchema.default('assessify.ie,localhost'),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

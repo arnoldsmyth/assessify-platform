@@ -8,3 +8,4 @@ export * from './questionnaire-session';
 export * from './questionnaires';
 export * from './respondent-access';
 export * from './translations';
+export * from './tenants';
