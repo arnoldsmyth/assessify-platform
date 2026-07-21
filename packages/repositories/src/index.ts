@@ -73,6 +73,12 @@ export {
   type InvitationSessionRepository,
 } from './postgres/invitation-sessions';
 export {
+  createReminderSessionRepository,
+  type DueReminderQuery,
+  type ReminderSessionRecord,
+  type ReminderSessionRepository,
+} from './postgres/reminder-sessions';
+export {
   createInMemoryPinAttemptStore,
   type PinAttemptState,
   type PinAttemptStore,

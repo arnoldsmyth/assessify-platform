@@ -22,6 +22,7 @@ import {
   getHealth,
   getInvitationService,
   getNotificationService,
+  getReminderService,
   getScoringService,
 } from '@assessify/services';
 import type { Mailer } from '@assessify/adapters';
@@ -80,6 +81,18 @@ async function main(): Promise<void> {
       )
     : undefined;
 
+  // Reminder engine (D6): the hourly `reminders.sweep` schedule drives it;
+  // links/senders resolve exactly like invitations (same host + sender rules).
+  const reminders = env.databaseUrl
+    ? getReminderService(
+        { queue: jobQueue },
+        {
+          slugBaseDomain: env.slugBaseDomains[0] ?? 'assessify.ie',
+          platformSender: env.mailFrom,
+        }
+      )
+    : undefined;
+
   // Scoring (E1): the internal sync engine ships with the worker; the E2
   // async-external wrapper joins this map when it lands. `queue` lets the
   // service re-enqueue retries through the same adapter services use.
@@ -98,6 +111,7 @@ async function main(): Promise<void> {
     notifications: { service: notifications },
     scoring: { service: scoring },
     invitations: { service: invitations },
+    reminders: { service: reminders },
   });
   const worker = new Worker(ASSESSIFY_QUEUE_NAME, (job) => dispatchJob(registry, job), {
     connection,

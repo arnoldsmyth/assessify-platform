@@ -89,6 +89,14 @@ export const invitationsDispatchPayloadSchema = z.object({
   requestedByUserId: z.string().uuid().nullable().default(null),
 });
 
+/**
+ * Reminder-engine sweep (D6 — spec 13): repeatable hourly job registered in
+ * apps/worker/src/repeatable-jobs.ts. The reminder service selects due
+ * sessions itself (2-day spacing, 30-day stop, suppression, order state), so
+ * the payload is empty — every run re-evaluates the whole population.
+ */
+export const remindersSweepPayloadSchema = z.object({});
+
 /** Single source of truth mapping job name → payload schema. */
 export const jobPayloadSchemas = {
   'health.ping': healthPingPayloadSchema,
@@ -96,6 +104,7 @@ export const jobPayloadSchemas = {
   'notifications.send': notificationSendPayloadSchema,
   'scoring.dispatch': scoringDispatchPayloadSchema,
   'invitations.dispatch': invitationsDispatchPayloadSchema,
+  'reminders.sweep': remindersSweepPayloadSchema,
 } as const;
 
 export type JobName = keyof typeof jobPayloadSchemas;

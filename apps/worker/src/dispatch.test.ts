@@ -10,6 +10,7 @@ function makeRegistry(overrides: Partial<ProcessorRegistry> = {}): ProcessorRegi
     'notifications.send': vi.fn(async () => undefined),
     'scoring.dispatch': vi.fn(async () => undefined),
     'invitations.dispatch': vi.fn(async () => undefined),
+    'reminders.sweep': vi.fn(async () => undefined),
     ...overrides,
   };
 }
