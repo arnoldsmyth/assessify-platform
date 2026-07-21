@@ -59,6 +59,7 @@ export function QuestionnaireRenderer({
   const [saving, setSaving] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [gateMessage, setGateMessage] = useState<string | null>(null);
+  const [gateMissing, setGateMissing] = useState<string[]>([]);
   const [submitMissing, setSubmitMissing] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -111,6 +112,7 @@ export function QuestionnaireRenderer({
       setAnswers((prev) => ({ ...prev, [questionKey]: record }));
       dirtyRef.current.add(questionKey);
       setGateMessage(null);
+      setGateMissing((prev) => (prev.includes(questionKey) ? prev.filter((k) => k !== questionKey) : prev));
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => void flush(), AUTOSAVE_DEBOUNCE_MS);
     },
@@ -135,6 +137,7 @@ export function QuestionnaireRenderer({
     const flushed = await flush();
     if (!flushed) return; // autosave failure blocks navigation (spec 07)
     setGateMessage(null);
+    setGateMissing([]);
     setPhase(nextPhase);
     setSectionIndex(nextIndex);
     const target = sections[nextIndex];
@@ -149,11 +152,15 @@ export function QuestionnaireRenderer({
     if (!section) return;
     const missing = unansweredRequired(section, answersRef.current);
     if (missing.length > 0) {
+      // Section-level summary + per-question inline errors (spec 15: error
+      // summary linked to fields — the inline slots carry the field half).
+      setGateMissing(missing.map((q) => q.key));
       setGateMessage(
         `Please answer all required questions in this section before continuing (${missing.length} remaining).`
       );
       return;
     }
+    setGateMissing([]);
     if (sectionIndex >= sections.length - 1) {
       const flushed = await flush();
       if (!flushed) return;
@@ -283,25 +290,46 @@ export function QuestionnaireRenderer({
           ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-8">
-          {section.questions.map((question) => (
-            <div key={question.key} className="flex flex-col gap-3">
-              {question.type !== 'content' ? (
-                <p className="text-base font-medium text-ink">
-                  {labelFromKey(question.textKey)}
-                  {question.required ? (
-                    <span aria-hidden="true" className="text-red">
-                      {' '}
-                      *
-                    </span>
-                  ) : null}
-                </p>
-              ) : null}
-              {question.type !== 'content' && question.helpKey ? (
-                <p className="text-sm text-muted">{labelFromKey(question.helpKey)}</p>
-              ) : null}
-              <QuestionInput question={question} record={answers[question.key]} onAnswer={handleAnswer} />
-            </div>
-          ))}
+          {section.questions.map((question) => {
+            // Stable ids let the per-type components wire aria-labelledby /
+            // aria-describedby back to the text the renderer draws here.
+            const labelId = `q-${question.key}-label`;
+            const helpId =
+              question.type !== 'content' && question.helpKey ? `q-${question.key}-help` : undefined;
+            return (
+              <div key={question.key} className="flex flex-col gap-3">
+                {question.type !== 'content' ? (
+                  <p id={labelId} className="text-base font-medium text-ink">
+                    {labelFromKey(question.textKey)}
+                    {question.required ? (
+                      <span aria-hidden="true" className="text-red">
+                        {' '}
+                        *
+                      </span>
+                    ) : null}
+                  </p>
+                ) : null}
+                {helpId !== undefined && question.type !== 'content' && question.helpKey ? (
+                  <p id={helpId} className="text-sm text-muted">
+                    {labelFromKey(question.helpKey)}
+                  </p>
+                ) : null}
+                <QuestionInput
+                  question={question}
+                  record={answers[question.key]}
+                  onAnswer={handleAnswer}
+                  labelId={labelId}
+                  helpId={helpId}
+                  disabled={submitting}
+                  error={
+                    gateMissing.includes(question.key)
+                      ? 'This question needs an answer before you can continue.'
+                      : undefined
+                  }
+                />
+              </div>
+            );
+          })}
 
           {gateMessage ? (
             <div role="alert" className="rounded-md border border-amber/30 bg-amber-tint px-4 py-3 text-sm text-amber">
