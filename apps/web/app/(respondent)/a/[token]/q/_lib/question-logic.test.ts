@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  chooseIpsative,
   clampFreeText,
   countWords,
   freeTextCounts,
+  ipsativeStatus,
+  isPermutationOf,
   limitWords,
   matrixCompletion,
+  moveItem,
+  normalizeRankingOrder,
   numericStatus,
   scalePoints,
   toggleSelection,
@@ -184,5 +189,217 @@ describe('matrixCompletion', () => {
     const result = matrixCompletion(rows, { bogus: 2 });
     expect(result.answeredCount).toBe(0);
     expect(result.complete).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ranking (C4)
+// ---------------------------------------------------------------------------
+
+describe('isPermutationOf', () => {
+  const keys = ['a', 'b', 'c'];
+
+  it('accepts any full reordering of the keys', () => {
+    expect(isPermutationOf(['a', 'b', 'c'], keys)).toBe(true);
+    expect(isPermutationOf(['c', 'a', 'b'], keys)).toBe(true);
+  });
+
+  it('rejects a subset (partial rankings are never valid answers)', () => {
+    expect(isPermutationOf(['a', 'b'], keys)).toBe(false);
+    expect(isPermutationOf([], keys)).toBe(false);
+  });
+
+  it('rejects a superset and duplicates', () => {
+    expect(isPermutationOf(['a', 'b', 'c', 'c'], keys)).toBe(false);
+    expect(isPermutationOf(['a', 'a', 'b'], keys)).toBe(false);
+  });
+
+  it('rejects unknown keys even at the right length', () => {
+    expect(isPermutationOf(['a', 'b', 'x'], keys)).toBe(false);
+  });
+
+  it('handles the empty question (degenerate) and single-item case', () => {
+    expect(isPermutationOf([], [])).toBe(true);
+    expect(isPermutationOf(['a'], ['a'])).toBe(true);
+    expect(isPermutationOf(['b'], ['a'])).toBe(false);
+  });
+});
+
+describe('normalizeRankingOrder', () => {
+  const keys = ['a', 'b', 'c'];
+
+  it('uses the saved order when it is a valid permutation', () => {
+    expect(normalizeRankingOrder(keys, ['c', 'a', 'b'])).toEqual(['c', 'a', 'b']);
+  });
+
+  it('falls back to definition order when there is no saved answer', () => {
+    expect(normalizeRankingOrder(keys, undefined)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('falls back to definition order for a corrupt/partial saved order', () => {
+    expect(normalizeRankingOrder(keys, ['a', 'b'])).toEqual(['a', 'b', 'c']);
+    expect(normalizeRankingOrder(keys, ['a', 'b', 'x'])).toEqual(['a', 'b', 'c']);
+    expect(normalizeRankingOrder(keys, ['a', 'a', 'b'])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('returns fresh arrays (never aliases its inputs)', () => {
+    const saved = ['b', 'a'];
+    const result = normalizeRankingOrder(['a', 'b'], saved);
+    expect(result).toEqual(saved);
+    expect(result).not.toBe(saved);
+  });
+});
+
+describe('moveItem', () => {
+  const order = ['a', 'b', 'c', 'd'];
+
+  it('moves an item up one position', () => {
+    expect(moveItem(order, 2, -1)).toEqual({ next: ['a', 'c', 'b', 'd'], moved: true, to: 1 });
+  });
+
+  it('moves an item down one position', () => {
+    expect(moveItem(order, 0, 1)).toEqual({ next: ['b', 'a', 'c', 'd'], moved: true, to: 1 });
+  });
+
+  it('is a no-op at the boundaries', () => {
+    expect(moveItem(order, 0, -1)).toEqual({ next: order, moved: false, to: 0 });
+    expect(moveItem(order, 3, 1)).toEqual({ next: order, moved: false, to: 3 });
+  });
+
+  it('is a no-op for a zero delta and out-of-range indices', () => {
+    expect(moveItem(order, 1, 0).moved).toBe(false);
+    expect(moveItem(order, 9, -1).moved).toBe(false);
+    expect(moveItem(order, -1, 1).moved).toBe(false);
+  });
+
+  it('supports multi-step deltas within bounds', () => {
+    expect(moveItem(order, 0, 3)).toEqual({ next: ['b', 'c', 'd', 'a'], moved: true, to: 3 });
+    expect(moveItem(order, 3, -3)).toEqual({ next: ['d', 'a', 'b', 'c'], moved: true, to: 0 });
+  });
+
+  it('handles the minimal 2-item ranking (single swap both ways)', () => {
+    expect(moveItem(['a', 'b'], 1, -1).next).toEqual(['b', 'a']);
+    expect(moveItem(['a', 'b'], 0, 1).next).toEqual(['b', 'a']);
+    expect(moveItem(['a', 'b'], 0, -1).moved).toBe(false);
+    expect(moveItem(['a', 'b'], 1, 1).moved).toBe(false);
+  });
+
+  it('the result of any move is still a permutation of the input', () => {
+    const result = moveItem(order, 1, 2);
+    expect(isPermutationOf(result.next, order)).toBe(true);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = ['a', 'b', 'c'];
+    moveItem(input, 0, 2);
+    expect(input).toEqual(['a', 'b', 'c']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ipsative most/least (C4)
+// ---------------------------------------------------------------------------
+
+describe('chooseIpsative', () => {
+  const empty = { most: null, least: null };
+
+  it('records a first Most (incomplete, nothing cleared)', () => {
+    expect(chooseIpsative(empty, 'most', 'a')).toEqual({
+      next: { most: 'a', least: null },
+      cleared: null,
+      complete: false,
+    });
+  });
+
+  it('records a first Least (incomplete, nothing cleared)', () => {
+    expect(chooseIpsative(empty, 'least', 'b')).toEqual({
+      next: { most: null, least: 'b' },
+      cleared: null,
+      complete: false,
+    });
+  });
+
+  it('completes the pair on different rows', () => {
+    expect(chooseIpsative({ most: 'a', least: null }, 'least', 'b')).toEqual({
+      next: { most: 'a', least: 'b' },
+      cleared: null,
+      complete: true,
+    });
+  });
+
+  it('clears Least when Most is chosen on the row holding Least', () => {
+    expect(chooseIpsative({ most: null, least: 'a' }, 'most', 'a')).toEqual({
+      next: { most: 'a', least: null },
+      cleared: 'least',
+      complete: false,
+    });
+  });
+
+  it('clears Most when Least is chosen on the row holding Most', () => {
+    expect(chooseIpsative({ most: 'a', least: 'b' }, 'least', 'a')).toEqual({
+      next: { most: null, least: 'a' },
+      cleared: 'most',
+      complete: false,
+    });
+  });
+
+  it('moving a selection to another row keeps the other column (still complete)', () => {
+    expect(chooseIpsative({ most: 'a', least: 'b' }, 'most', 'c')).toEqual({
+      next: { most: 'c', least: 'b' },
+      cleared: null,
+      complete: true,
+    });
+  });
+
+  it('re-selecting the current value is a stable no-op', () => {
+    expect(chooseIpsative({ most: 'a', least: 'b' }, 'most', 'a')).toEqual({
+      next: { most: 'a', least: 'b' },
+      cleared: null,
+      complete: true,
+    });
+  });
+
+  it('single-row block can never complete (conflict always clears the other column)', () => {
+    const afterMost = chooseIpsative(empty, 'most', 'only');
+    const afterLeast = chooseIpsative(afterMost.next, 'least', 'only');
+    expect(afterLeast).toEqual({
+      next: { most: null, least: 'only' },
+      cleared: 'most',
+      complete: false,
+    });
+  });
+
+  it('never produces most === least, from any state', () => {
+    const states = [
+      empty,
+      { most: 'a', least: null },
+      { most: null, least: 'a' },
+      { most: 'a', least: 'b' },
+    ];
+    for (const state of states) {
+      for (const column of ['most', 'least'] as const) {
+        for (const key of ['a', 'b', 'c']) {
+          const { next } = chooseIpsative(state, column, key);
+          if (next.most !== null && next.least !== null) {
+            expect(next.most).not.toBe(next.least);
+          }
+        }
+      }
+    }
+  });
+
+  it('does not mutate the input pair', () => {
+    const pair = { most: 'a', least: 'b' };
+    chooseIpsative(pair, 'least', 'a');
+    expect(pair).toEqual({ most: 'a', least: 'b' });
+  });
+});
+
+describe('ipsativeStatus', () => {
+  it('distinguishes the four states (spec 07 distinct messages)', () => {
+    expect(ipsativeStatus({ most: null, least: null })).toBe('empty');
+    expect(ipsativeStatus({ most: 'a', least: null })).toBe('need_least');
+    expect(ipsativeStatus({ most: null, least: 'a' })).toBe('need_most');
+    expect(ipsativeStatus({ most: 'a', least: 'b' })).toBe('complete');
   });
 });
