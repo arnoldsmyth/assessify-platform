@@ -23,9 +23,10 @@ import {
   getInvitationService,
   getNotificationService,
   getReminderService,
+  getReportService,
   getScoringService,
 } from '@assessify/services';
-import type { Mailer, ScoringAdapter } from '@assessify/adapters';
+import type { Mailer, ObjectStorage, ScoringAdapter } from '@assessify/adapters';
 import {
   ASSESSIFY_QUEUE_NAME,
   BullMqJobQueue,
@@ -35,6 +36,7 @@ import { createConsoleMailer } from '@assessify/adapters/mailer/console';
 import { createSendGridMailer } from '@assessify/adapters/mailer/sendgrid';
 import { createInternalSyncScoringAdapter } from '@assessify/adapters/scoring/internal-sync';
 import { createPrologicScoringAdapter } from '@assessify/adapters/scoring/prologic';
+import { S3Storage, s3ConfigFromEnv } from '@assessify/adapters/storage/s3';
 import { loadWorkerEnv } from './env';
 import { dispatchJob } from './dispatch';
 import { createProcessorRegistry } from './processors';
@@ -129,10 +131,23 @@ async function main(): Promise<void> {
     console.log('[worker] DATABASE_URL not set — scoring.dispatch jobs will fail');
   }
 
+  // Report assembly (E3): needs the database AND S3-compatible object
+  // storage (uploaded templates + assembled HTML). Without either, the
+  // processor parks report.assemble jobs unrecoverably with a clear message.
+  let storage: ObjectStorage | undefined;
+  try {
+    storage = new S3Storage(s3ConfigFromEnv());
+  } catch {
+    console.log('[worker] S3_* storage env not set — report.assemble jobs will fail');
+  }
+  const reportsService =
+    env.databaseUrl && storage ? getReportService({ storage }) : undefined;
+
   const registry = createProcessorRegistry({
     health: { getHealth },
     notifications: { service: notifications },
     scoring: { service: scoring },
+    reports: { service: reportsService },
     invitations: { service: invitations },
     reminders: { service: reminders },
   });

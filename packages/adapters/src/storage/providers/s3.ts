@@ -266,7 +266,9 @@ export class S3Storage implements ObjectStorage {
       return await this.fetchFn(`${this.protocol}//${this.host}${canonicalUri}`, {
         method,
         headers: requestHeaders,
-        body: options.body,
+        // Fresh copy: pins the generic to Uint8Array<ArrayBuffer> so the call
+        // typechecks under both Node and DOM fetch lib definitions.
+        body: options.body ? new Uint8Array(options.body) : undefined,
       });
     } catch (cause) {
       throw new StorageError(`S3 ${method} request failed`, { key, cause });

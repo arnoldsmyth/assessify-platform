@@ -90,6 +90,19 @@ export const invitationsDispatchPayloadSchema = z.object({
 });
 
 /**
+ * Report assembly for one scored session (E3 — spec 09 `report.assemble`).
+ * Enqueued by the scoring service's report-assembly dispatcher when
+ * `applyScores` completes; the worker processor hands the session id to
+ * `reportService.assemble`, which loads the scored session, merges the
+ * product's uploaded HTML template and persists the `reports` row. Ids only —
+ * scores and respondent data are always re-read from the database.
+ */
+export const reportAssemblePayloadSchema = z.object({
+  /** `respondent_sessions.id` of the scored session (also the dedupe key). */
+  sessionId: z.string().uuid(),
+});
+
+/**
  * Reminder-engine sweep (D6 — spec 13): repeatable hourly job registered in
  * apps/worker/src/repeatable-jobs.ts. The reminder service selects due
  * sessions itself (2-day spacing, 30-day stop, suppression, order state), so
@@ -103,6 +116,7 @@ export const jobPayloadSchemas = {
   'maintenance.heartbeat': heartbeatPayloadSchema,
   'notifications.send': notificationSendPayloadSchema,
   'scoring.dispatch': scoringDispatchPayloadSchema,
+  'report.assemble': reportAssemblePayloadSchema,
   'invitations.dispatch': invitationsDispatchPayloadSchema,
   'reminders.sweep': remindersSweepPayloadSchema,
 } as const;

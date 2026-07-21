@@ -46,6 +46,7 @@ describe('reminders.sweep processor', () => {
       },
       notifications: { service: undefined },
       scoring: { service: undefined },
+      reports: { service: undefined },
       invitations: { service: undefined },
       reminders: { service: { sweep: vi.fn().mockResolvedValue(ok(summary)) } },
     });

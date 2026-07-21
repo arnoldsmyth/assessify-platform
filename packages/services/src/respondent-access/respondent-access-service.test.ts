@@ -44,6 +44,7 @@ function makeSessionRepo(seed: RespondentAccessSession[]) {
     markCompleted: vi.fn(async () => undefined),
     markAwaitingScores: vi.fn(async () => false),
     applyScores: vi.fn(async () => false),
+    markReportReady: vi.fn(async () => false),
   } satisfies RespondentSessionRepository;
 }
 

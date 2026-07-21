@@ -11,6 +11,7 @@ export * from './products';
 export * from './questionnaire-session';
 export * from './questionnaires';
 export * from './reminders';
+export * from './reports';
 export * from './respondent-access';
 export * from './scoring';
 export * from './translations';

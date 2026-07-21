@@ -33,6 +33,7 @@ describe.runIf(connectionUrl !== undefined)('queue round trip (integration)', ()
       health: { getHealth },
       notifications: { service: undefined },
       scoring: { service: undefined },
+      reports: { service: undefined },
       invitations: { service: undefined },
       reminders: { service: undefined },
     });

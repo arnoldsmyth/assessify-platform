@@ -20,6 +20,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuditService } from '../audit';
+import type { ReportAssemblyDispatcher } from '../reports/dispatcher';
 import { buildScoringAnswers, createScoringService } from './scoring-service';
 
 const SESSION_ID = '01890000-0000-7000-8000-00000000aaaa';
@@ -297,6 +298,7 @@ interface BuildOverrides {
   queue?: ReturnType<typeof fakeQueue> | undefined;
   adapter?: ReturnType<typeof createMemoryScoringAdapter> | undefined;
   respondents?: { findById: (id: string) => Promise<RespondentIdentity | null> };
+  reportAssembly?: ReportAssemblyDispatcher;
 }
 
 function build(overrides: BuildOverrides = {}) {
@@ -326,6 +328,7 @@ function build(overrides: BuildOverrides = {}) {
     queue,
     adapters: adapter ? { [adapter.mode]: adapter } : {},
     ...(overrides.respondents ? { respondents: overrides.respondents } : {}),
+    ...(overrides.reportAssembly ? { reportAssembly: overrides.reportAssembly } : {}),
     now: () => NOW,
     generateId: () => JOB_ID,
   });
@@ -621,6 +624,40 @@ describe('applyScores', () => {
     const replay = await service.applyScores(JOB_ID, { dimensions: { drive: 999 } });
     expect(replay.ok).toBe(true);
     expect(sessions.scores).toEqual({ dimensions: { drive: 6 } }); // untouched
+  });
+
+  it('enqueues report.assemble for the session once scores are applied (E3 hook)', async () => {
+    const adapter = createMemoryScoringAdapter();
+    adapter.queueOutcome({ kind: 'sync_result', scores: { dimensions: { drive: 6 } } });
+    const { service, queue } = await dispatched({ adapter });
+
+    const result = await service.processJob(JOB_ID);
+    expect(result.ok).toBe(true);
+    expect(queue?.enqueued.at(-1)).toEqual({
+      jobName: 'report.assemble',
+      payload: { sessionId: SESSION_ID },
+    });
+  });
+
+  it('a failed report.assemble enqueue never fails the score application', async () => {
+    const adapter = createMemoryScoringAdapter();
+    adapter.queueOutcome({ kind: 'sync_result', scores: { dimensions: { drive: 6 } } });
+    const { service, sessions, audit } = await dispatched({
+      adapter,
+      reportAssembly: {
+        dispatch: async () => err({ code: 'report/assembly_enqueue_failed', message: 'boom' }),
+      },
+    });
+
+    const result = await service.processJob(JOB_ID);
+    expect(result.ok).toBe(true);
+    expect(sessions.session?.status).toBe('scored');
+    expect(audit.record).toHaveBeenCalledWith(
+      { kind: 'system', id: 'system' },
+      'report.assembly_dispatch_failed',
+      { type: 'respondent_session', id: SESSION_ID },
+      expect.objectContaining({ error: 'report/assembly_enqueue_failed' })
+    );
   });
 });
 

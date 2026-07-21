@@ -44,6 +44,11 @@ export interface RespondentSessionRepository {
    * row was written.
    */
   applyScores(id: string, scores: Record<string, unknown>, at: Date): Promise<boolean>;
+  /**
+   * scored → report_ready (report assembled — spec 09/E3). Re-entrant from
+   * `report_ready` so re-assembly is a no-op; returns whether a row matched.
+   */
+  markReportReady(id: string, at: Date): Promise<boolean>;
 }
 
 type SessionRow = typeof respondentSessions.$inferSelect;
@@ -126,6 +131,19 @@ export function createRespondentSessionRepository(
           and(
             eq(respondentSessions.id, id),
             inArray(respondentSessions.status, ['completed', 'awaiting_scores', 'scored'])
+          )
+        )
+        .returning({ id: respondentSessions.id });
+      return rows.length > 0;
+    },
+    async markReportReady(id: string, at: Date) {
+      const rows = await db
+        .update(respondentSessions)
+        .set({ status: 'report_ready', updatedAt: at })
+        .where(
+          and(
+            eq(respondentSessions.id, id),
+            inArray(respondentSessions.status, ['scored', 'report_ready'])
           )
         )
         .returning({ id: respondentSessions.id });

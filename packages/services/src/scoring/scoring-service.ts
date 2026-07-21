@@ -34,6 +34,11 @@ import type {
 
 import type { AuditService } from '../audit';
 import type { OrderService } from '../orders';
+import {
+  createQueueReportAssemblyDispatcher,
+  noopReportAssemblyDispatcher,
+  type ReportAssemblyDispatcher,
+} from '../reports/dispatcher';
 import type { ScoringDispatchReceipt, ScoringDispatcher } from './dispatcher';
 
 /**
@@ -135,6 +140,12 @@ export interface ScoringServiceDeps {
   /** Required for dispatch/retry; processJob never enqueues. */
   queue?: JobQueue;
   adapters?: ScoringServiceAdapters;
+  /**
+   * Seam through which applyScores triggers `report.assemble` (spec 09 —
+   * E3). Defaults to a queue-backed dispatcher when `queue` is present, else
+   * a no-op (admin reassemble catches up later).
+   */
+  reportAssembly?: ReportAssemblyDispatcher;
   now?: () => Date;
   generateId?: () => string;
 }
@@ -188,6 +199,9 @@ export function createScoringService(deps: ScoringServiceDeps): ScoringService {
   const now = deps.now ?? (() => new Date());
   const generateId = deps.generateId ?? uuidv7;
   const systemActor = { kind: 'system' as const, id: 'system' };
+  const reportAssembly =
+    deps.reportAssembly ??
+    (deps.queue ? createQueueReportAssemblyDispatcher(deps.queue) : noopReportAssemblyDispatcher);
 
   /**
    * Drive an order transition as the system, tolerating races: an
@@ -283,8 +297,18 @@ export function createScoringService(deps: ScoringServiceDeps): ScoringService {
       }
     );
     if (!audited.ok) return err(audited.error);
-    // Report assembly (`report.assemble`, spec 09) hooks in here once E3+
-    // lands; until then the order stays `processing_report` after scoring.
+    // Report assembly (`report.assemble`, spec 09 / E3) fires here. A failed
+    // enqueue never rolls back the applied scores — the order simply stays
+    // `processing_report` until an admin re-assembles; the failure is audited.
+    const dispatched = await reportAssembly.dispatch(job.sessionId);
+    if (!dispatched.ok) {
+      await audit.record(
+        systemActor,
+        'report.assembly_dispatch_failed',
+        { type: 'respondent_session', id: job.sessionId },
+        { jobId: job.id, error: dispatched.error.code }
+      );
+    }
     return ok({ jobId: job.id, sessionId: job.sessionId, status: 'completed' });
   }
 

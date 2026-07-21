@@ -88,6 +88,18 @@ export {
   type RespondentRepository,
 } from './postgres/respondents';
 export {
+  createReportTemplateVersionRepository,
+  type ReportTemplateVersion,
+  type ReportTemplateVersionRepository,
+} from './postgres/report-template-versions';
+export {
+  createReportRepository,
+  type ReportAssemblyPatch,
+  type ReportAssemblySource,
+  type ReportRecord,
+  type ReportRepository,
+} from './postgres/reports';
+export {
   createInvitationSessionRepository,
   type InvitationSessionRecord,
   type InvitationSessionRepository,
