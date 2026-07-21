@@ -147,6 +147,126 @@ export function freeTextCounts(
 }
 
 // ---------------------------------------------------------------------------
+// Ranking (C4)
+// ---------------------------------------------------------------------------
+
+/**
+ * True when `candidate` is a full permutation of `keys` — same length, no
+ * duplicates, every entry known. Mirrors the server's
+ * `not_a_permutation_of_options` check in answer-validation.ts exactly: the
+ * component must never emit anything else, because a partial or corrupt order
+ * fails the whole autosave patch.
+ */
+export function isPermutationOf(candidate: readonly string[], keys: readonly string[]): boolean {
+  if (candidate.length !== keys.length) return false;
+  if (new Set(candidate).size !== candidate.length) return false;
+  const known = new Set(keys);
+  return candidate.every((key) => known.has(key));
+}
+
+/**
+ * Working order for the ranking component: the saved answer when it is a
+ * valid permutation of the current option keys, otherwise the definition
+ * order. A saved order can only be invalid if the definition changed under a
+ * pinned session (should not happen — versions are immutable) or the record
+ * was corrupted; falling back to definition order is the safe recovery.
+ */
+export function normalizeRankingOrder(
+  optionKeys: readonly string[],
+  saved: readonly string[] | undefined
+): string[] {
+  if (saved !== undefined && isPermutationOf(saved, optionKeys)) return [...saved];
+  return [...optionKeys];
+}
+
+export interface RankingMove {
+  next: string[];
+  /** False when the move was a no-op (already at the boundary / bad index). */
+  moved: boolean;
+  /** 0-based index the item ended up at (=== from when not moved). */
+  to: number;
+}
+
+/**
+ * Move the item at `index` by `delta` positions (usually ±1 for the up/down
+ * buttons). Boundary and out-of-range moves are no-ops so callers can wire
+ * buttons without pre-checking. Never mutates the input.
+ */
+export function moveItem(order: readonly string[], index: number, delta: number): RankingMove {
+  const item = order[index];
+  const to = index + delta;
+  if (item === undefined || to < 0 || to >= order.length || delta === 0) {
+    return { next: [...order], moved: false, to: index };
+  }
+  const next = [...order];
+  next.splice(index, 1);
+  next.splice(to, 0, item);
+  return { next, moved: true, to };
+}
+
+// ---------------------------------------------------------------------------
+// Ipsative most/least (C4)
+// ---------------------------------------------------------------------------
+
+/** Partial most/least pair while the respondent is building the answer. */
+export interface IpsativePair {
+  most: string | null;
+  least: string | null;
+}
+
+export interface IpsativeChoice {
+  next: IpsativePair;
+  /**
+   * Column that was auto-cleared by the same-row conflict rule (spec 07:
+   * choosing Most on the row that currently holds Least clears Least, and
+   * vice versa — never both on one row, never a silently invalid pair).
+   */
+  cleared: 'most' | 'least' | null;
+  /** True when the pair is now complete (both chosen, provably different). */
+  complete: boolean;
+}
+
+/**
+ * Apply one radio selection to the pair. The returned pair is always valid
+ * (most !== least when both set), so a `complete` result can be stamped
+ * straight into the domain's ipsative record, whose Zod refine rejects
+ * most === least.
+ */
+export function chooseIpsative(
+  pair: IpsativePair,
+  column: 'most' | 'least',
+  itemKey: string
+): IpsativeChoice {
+  let { most, least } = pair;
+  let cleared: IpsativeChoice['cleared'] = null;
+  if (column === 'most') {
+    most = itemKey;
+    if (least === itemKey) {
+      least = null;
+      cleared = 'least';
+    }
+  } else {
+    least = itemKey;
+    if (most === itemKey) {
+      most = null;
+      cleared = 'most';
+    }
+  }
+  return { next: { most, least }, cleared, complete: most !== null && least !== null };
+}
+
+export type IpsativeStatus = 'empty' | 'need_most' | 'need_least' | 'complete';
+
+/** Completion state driving the ipsative hint/status copy (spec 07 mandates
+ * distinct messages for missing Most vs missing Least). */
+export function ipsativeStatus(pair: IpsativePair): IpsativeStatus {
+  if (pair.most !== null && pair.least !== null) return 'complete';
+  if (pair.most !== null) return 'need_least';
+  if (pair.least !== null) return 'need_most';
+  return 'empty';
+}
+
+// ---------------------------------------------------------------------------
 // Matrix completion
 // ---------------------------------------------------------------------------
 
