@@ -53,6 +53,19 @@ const serverEnvSchema = z.object({
   /** Redis-compatible fallback name (local docker, CI). */
   REDIS_URL: z.string().regex(/^rediss?:\/\//).optional(),
   /**
+   * Internal pdf-service base URL (spec 09, e.g.
+   * `http://pdf-service.internal:8080`). Optional: report PDF downloads
+   * return `report/pdf_renderer_unavailable` until both are configured.
+   */
+  PDF_SERVICE_URL: z.string().url().optional(),
+  /**
+   * Shared secret for BOTH directions of the pdf-service contract (E4): sent
+   * as `x-pdf-service-secret` when calling /render, and required on inbound
+   * `/report-print/{id}` fetches (option A). The print route answers 503
+   * until it is configured — never secret-less.
+   */
+  PDF_SERVICE_SHARED_SECRET: z.string().min(16).optional(),
+  /**
    * Comma-separated super-admin addresses for `error_alert` mail (spec 06
    * error states). Optional: unset skips alert emails (audit still records).
    */

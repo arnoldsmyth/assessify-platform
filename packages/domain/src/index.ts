@@ -7,6 +7,7 @@ export * from './notifications';
 export * from './organizations';
 export * from './payments';
 export * from './products';
+export * from './reports';
 export * from './respondent-access';
 export * from './responses';
 export * from './scoring';

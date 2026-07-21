@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Archive, ArrowLeft, FileJson, Languages } from 'lucide-react';
+import { Archive, ArrowLeft, FileChartColumn, FileJson, Languages } from 'lucide-react';
 
 import { Button } from '@assessify/ui';
 import { getProductService } from '@assessify/services';
@@ -49,6 +49,12 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
             <Link href={`/admin/products/${product.id}/questionnaires`}>
               <FileJson size={16} strokeWidth={1.75} aria-hidden="true" />
               Questionnaire versions
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/admin/products/${product.id}/report-templates`}>
+              <FileChartColumn size={16} strokeWidth={1.75} aria-hidden="true" />
+              Report templates
             </Link>
           </Button>
           <Button asChild variant="outline">

@@ -168,6 +168,11 @@ class FakeSessions implements RespondentSessionRepository {
     this.session = { ...this.session, status: 'scored' };
     return true;
   }
+  async markReportReady(): Promise<boolean> {
+    if (this.session?.status !== 'scored') return false;
+    this.session = { ...this.session, status: 'report_ready' };
+    return true;
+  }
 }
 
 function fakeVersions(def: unknown = definition): QuestionnaireVersionRepository {
