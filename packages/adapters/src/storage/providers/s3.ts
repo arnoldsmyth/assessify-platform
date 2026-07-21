@@ -9,22 +9,22 @@ import {
 } from '../types';
 
 /**
- * DigitalOcean Spaces provider (S3-compatible REST API, virtual-hosted style)
- * with hand-rolled AWS Signature v4 over node:crypto — no AWS SDK dependency.
- * Verified against the published AWS SigV4 test vectors (see spaces.test.ts).
+ * Generic S3-compatible object storage provider (virtual-hosted style REST
+ * API) with hand-rolled AWS Signature v4 over node:crypto — no AWS SDK
+ * dependency. Works against any S3-compatible backend (Hetzner Object
+ * Storage, DigitalOcean Spaces, MinIO, AWS S3 itself, ...) — the provider
+ * has no built-in assumptions about which one; `endpoint` is always explicit.
+ * Verified against the published AWS SigV4 test vectors (see s3.test.ts).
  */
 
-export interface SpacesStorageConfig {
-  /** e.g. 'ams3', 'fra1' — becomes {region}.digitaloceanspaces.com. */
+export interface S3StorageConfig {
+  /** Signing region, e.g. 'fsn1' (Hetzner), 'ams3' (DO), 'us-east-1' (AWS). */
   region: string;
   bucket: string;
   accessKeyId: string;
   secretAccessKey: string;
-  /**
-   * Origin override for tests or other S3-compatibles
-   * (default `https://{region}.digitaloceanspaces.com`).
-   */
-  endpoint?: string;
+  /** Origin, e.g. `https://fsn1.your-objectstorage.com` (Hetzner). Required — no default provider. */
+  endpoint: string;
   /** Injectable for tests. */
   fetchFn?: typeof fetch;
   /** Injectable for deterministic signatures in tests. */
@@ -32,35 +32,37 @@ export interface SpacesStorageConfig {
 }
 
 /**
- * Build a SpacesStorageConfig from environment variables (composition roots
+ * Build an S3StorageConfig from environment variables (composition roots
  * only). Throws StorageError naming the missing variables — never their values.
  */
-export function spacesConfigFromEnv(
+export function s3ConfigFromEnv(
   env: Record<string, string | undefined> = process.env
-): SpacesStorageConfig {
+): S3StorageConfig {
   const required = {
-    region: env['DO_SPACES_REGION'],
-    bucket: env['DO_SPACES_BUCKET'],
-    accessKeyId: env['DO_SPACES_KEY'],
-    secretAccessKey: env['DO_SPACES_SECRET'],
+    region: env['S3_REGION'],
+    bucket: env['S3_BUCKET'],
+    accessKeyId: env['S3_ACCESS_KEY_ID'],
+    secretAccessKey: env['S3_SECRET_ACCESS_KEY'],
+    endpoint: env['S3_ENDPOINT'],
   };
   const missing = Object.entries({
-    DO_SPACES_REGION: required.region,
-    DO_SPACES_BUCKET: required.bucket,
-    DO_SPACES_KEY: required.accessKeyId,
-    DO_SPACES_SECRET: required.secretAccessKey,
+    S3_REGION: required.region,
+    S3_BUCKET: required.bucket,
+    S3_ACCESS_KEY_ID: required.accessKeyId,
+    S3_SECRET_ACCESS_KEY: required.secretAccessKey,
+    S3_ENDPOINT: required.endpoint,
   })
     .filter(([, value]) => !value)
     .map(([name]) => name);
   if (missing.length > 0) {
-    throw new StorageError(`Missing Spaces configuration: ${missing.join(', ')}`);
+    throw new StorageError(`Missing S3 configuration: ${missing.join(', ')}`);
   }
   return {
     region: required.region as string,
     bucket: required.bucket as string,
     accessKeyId: required.accessKeyId as string,
     secretAccessKey: required.secretAccessKey as string,
-    endpoint: env['DO_SPACES_ENDPOINT'],
+    endpoint: required.endpoint as string,
   };
 }
 
@@ -114,16 +116,14 @@ function signingKey(secret: string, dateStamp: string, region: string): Buffer {
 // Provider
 // ---------------------------------------------------------------------------
 
-export class SpacesStorage implements ObjectStorage {
+export class S3Storage implements ObjectStorage {
   private readonly host: string;
   private readonly protocol: string;
   private readonly fetchFn: typeof fetch;
   private readonly clock: () => Date;
 
-  constructor(private readonly config: SpacesStorageConfig) {
-    const endpoint = new URL(
-      config.endpoint ?? `https://${config.region}.digitaloceanspaces.com`
-    );
+  constructor(private readonly config: S3StorageConfig) {
+    const endpoint = new URL(config.endpoint);
     this.host = `${config.bucket}.${endpoint.host}`;
     this.protocol = endpoint.protocol;
     this.fetchFn = config.fetchFn ?? fetch;
@@ -269,7 +269,7 @@ export class SpacesStorage implements ObjectStorage {
         body: options.body,
       });
     } catch (cause) {
-      throw new StorageError(`Spaces ${method} request failed`, { key, cause });
+      throw new StorageError(`S3 ${method} request failed`, { key, cause });
     }
   }
 
@@ -281,7 +281,7 @@ export class SpacesStorage implements ObjectStorage {
     // S3 error bodies are XML without secrets; truncate defensively.
     const body = (await response.text().catch(() => '')).slice(0, 500);
     return new StorageError(
-      `Spaces ${operation} failed with status ${response.status}${body ? `: ${body}` : ''}`,
+      `S3 ${operation} failed with status ${response.status}${body ? `: ${body}` : ''}`,
       { key, statusCode: response.status }
     );
   }

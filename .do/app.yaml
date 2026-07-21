@@ -1,3 +1,9 @@
+# SUPERSEDED (2026-07-20): hosting moved from DO App Platform to Coolify
+# (GitHub-triggered deploy) with Hetzner Object Storage instead of DO Spaces
+# — see docs/deploy.md and bd issue asy-* (Coolify deploy migration). This
+# file is kept for reference only; its DO_SPACES_* env vars are stale
+# (renamed to S3_* — see .env.example) and it is not used by any deploy path.
+#
 # DigitalOcean App Platform spec — PRODUCTION (docs/spec/03-architecture.md topology).
 # One DO App, four components: web (Next.js) ×2, worker (BullMQ) ×1,
 # pdf-service (WeasyPrint, internal-only) ×1, managed Valkey attached.

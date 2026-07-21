@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { StorageError } from '../types';
-import { SpacesStorage, spacesConfigFromEnv } from './spaces';
+import { S3Storage, s3ConfigFromEnv } from './s3';
 
 /**
  * The AWS SigV4 test vector for presigned GETs (docs.aws.amazon.com
@@ -26,20 +26,21 @@ function makeFetchDouble(response: Response) {
   return vi.fn(async () => response);
 }
 
-function makeStorage(overrides: Partial<ConstructorParameters<typeof SpacesStorage>[0]> = {}) {
-  return new SpacesStorage({
-    region: 'ams3',
+function makeStorage(overrides: Partial<ConstructorParameters<typeof S3Storage>[0]> = {}) {
+  return new S3Storage({
+    region: 'fsn1',
     bucket: 'assessify-assets',
-    accessKeyId: 'DO00EXAMPLE',
+    accessKeyId: 'HETZNEREXAMPLE',
     secretAccessKey: 'secret',
+    endpoint: 'https://fsn1.your-objectstorage.com',
     clock: () => new Date('2026-07-14T09:00:00.000Z'),
     ...overrides,
   });
 }
 
-describe('SpacesStorage.signedUrl', () => {
+describe('S3Storage.signedUrl', () => {
   it('matches the published AWS SigV4 presigned-URL test vector', async () => {
-    const storage = new SpacesStorage({
+    const storage = new S3Storage({
       region: AWS_EXAMPLE.region,
       bucket: AWS_EXAMPLE.bucket,
       accessKeyId: AWS_EXAMPLE.accessKeyId,
@@ -61,18 +62,18 @@ describe('SpacesStorage.signedUrl', () => {
     );
   });
 
-  it('targets the DO Spaces virtual-hosted endpoint and encodes the key', async () => {
+  it('targets the S3-compatible virtual-hosted endpoint and encodes the key', async () => {
     const storage = makeStorage();
     const url = await storage.signedUrl({ key: 'branding/prod 1/logo.png' });
 
-    expect(url.startsWith('https://assessify-assets.ams3.digitaloceanspaces.com/')).toBe(true);
+    expect(url.startsWith('https://assessify-assets.fsn1.your-objectstorage.com/')).toBe(true);
     expect(url).toContain('/branding/prod%201/logo.png?');
     expect(url).toContain('X-Amz-Expires=900'); // 15-minute default
     expect(url).toMatch(/X-Amz-Signature=[0-9a-f]{64}$/);
   });
 });
 
-describe('SpacesStorage requests', () => {
+describe('S3Storage requests', () => {
   it('upload PUTs the body with SigV4 headers (content headers signed)', async () => {
     const fetchFn = makeFetchDouble(new Response(null, { status: 200 }));
     const storage = makeStorage({ fetchFn });
@@ -86,12 +87,12 @@ describe('SpacesStorage requests', () => {
 
     expect(fetchFn).toHaveBeenCalledOnce();
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://assessify-assets.ams3.digitaloceanspaces.com/branding/logo.png');
+    expect(url).toBe('https://assessify-assets.fsn1.your-objectstorage.com/branding/logo.png');
     expect(init.method).toBe('PUT');
 
     const headers = init.headers as Record<string, string>;
     expect(headers['authorization']).toMatch(
-      /^AWS4-HMAC-SHA256 Credential=DO00EXAMPLE\/20260714\/ams3\/s3\/aws4_request, SignedHeaders=cache-control;content-type;host;x-amz-content-sha256;x-amz-date, Signature=[0-9a-f]{64}$/
+      /^AWS4-HMAC-SHA256 Credential=HETZNEREXAMPLE\/20260714\/fsn1\/s3\/aws4_request, SignedHeaders=cache-control;content-type;host;x-amz-content-sha256;x-amz-date, Signature=[0-9a-f]{64}$/
     );
     expect(headers['x-amz-date']).toBe('20260714T090000Z');
     // Payload hash is the SHA-256 of the actual body, not UNSIGNED-PAYLOAD.
@@ -141,21 +142,21 @@ describe('SpacesStorage requests', () => {
   });
 });
 
-describe('spacesConfigFromEnv', () => {
-  it('builds a config from DO_SPACES_* variables', () => {
-    const config = spacesConfigFromEnv({
-      DO_SPACES_REGION: 'fra1',
-      DO_SPACES_BUCKET: 'assessify',
-      DO_SPACES_KEY: 'key',
-      DO_SPACES_SECRET: 'secret',
-      DO_SPACES_ENDPOINT: 'https://fra1.digitaloceanspaces.com',
+describe('s3ConfigFromEnv', () => {
+  it('builds a config from S3_* variables', () => {
+    const config = s3ConfigFromEnv({
+      S3_REGION: 'fsn1',
+      S3_BUCKET: 'assessify',
+      S3_ACCESS_KEY_ID: 'key',
+      S3_SECRET_ACCESS_KEY: 'secret',
+      S3_ENDPOINT: 'https://fsn1.your-objectstorage.com',
     });
-    expect(config).toMatchObject({ region: 'fra1', bucket: 'assessify' });
+    expect(config).toMatchObject({ region: 'fsn1', bucket: 'assessify' });
   });
 
   it('names (only) the missing variables', () => {
-    expect(() => spacesConfigFromEnv({ DO_SPACES_REGION: 'fra1' })).toThrowError(
-      /DO_SPACES_BUCKET, DO_SPACES_KEY, DO_SPACES_SECRET/
+    expect(() => s3ConfigFromEnv({ S3_REGION: 'fsn1' })).toThrowError(
+      /S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_ENDPOINT/
     );
   });
 });
