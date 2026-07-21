@@ -597,7 +597,7 @@ describe('submit', () => {
 describe('visibility evaluator seam', () => {
   const hideIpsative: VisibilityEvaluator = {
     isSectionVisible: () => true,
-    isQuestionVisible: (q) => q.key !== 'q_ips',
+    isQuestionVisible: (_definition, q) => q.key !== 'q_ips',
   };
 
   it('excludes hidden questions from progress totals and submit gating', async () => {
@@ -626,5 +626,182 @@ describe('visibility evaluator seam', () => {
     expect(stored?.answers.q_ips?.hidden).toBe(true);
     expect(stored?.answers.q_ips?.value).toEqual({ most: 'i1', least: 'i3' });
     expect(stored?.answers.q_likert?.hidden).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Branching integration (C5 — real showIf evaluator, the service default)
+// ---------------------------------------------------------------------------
+
+/**
+ * s1: q_gate (yes/no) + q_dep (required, showIf q_gate = 'yes')
+ * s2: showIf q_gate = 'yes' — q_s2 (required)
+ * s3: q_cascade (required, showIf answered q_s2) + q_end (required, always)
+ */
+const branchingInput: QuestionnaireDefinitionInput = {
+  schemaVersion: 1,
+  key: 'branching-def',
+  titleKey: 'b.title',
+  settings: { progressBar: true, allowBack: true },
+  sections: [
+    {
+      key: 's1',
+      questions: [
+        {
+          key: 'q_gate',
+          type: 'multiple_choice',
+          textKey: 'b.gate',
+          multi: false,
+          options: [
+            { key: 'yes', labelKey: 'b.yes' },
+            { key: 'no', labelKey: 'b.no' },
+          ],
+        },
+        {
+          key: 'q_dep',
+          type: 'likert',
+          textKey: 'b.dep',
+          scale: { min: 1, max: 5, labelKeys: {}, presentation: 'radio' },
+          showIf: { op: 'eq', question: 'q_gate', value: 'yes' },
+        },
+      ],
+    },
+    {
+      key: 's2',
+      showIf: { op: 'eq', question: 'q_gate', value: 'yes' },
+      questions: [
+        {
+          key: 'q_s2',
+          type: 'free_text',
+          textKey: 'b.s2',
+          multiline: false,
+        },
+      ],
+    },
+    {
+      key: 's3',
+      questions: [
+        {
+          key: 'q_cascade',
+          type: 'free_text',
+          textKey: 'b.cascade',
+          multiline: false,
+          showIf: { op: 'answered', question: 'q_s2' },
+        },
+        {
+          key: 'q_end',
+          type: 'free_text',
+          textKey: 'b.end',
+          multiline: false,
+        },
+      ],
+    },
+  ],
+};
+
+describe('branching integration (real showIf evaluator)', () => {
+  function buildBranching(responses = new FakeResponses()) {
+    // No explicit `visibility` — proves showIfVisibility is the default.
+    return build({ responses, versions: fakeVersions(branchingInput) });
+  }
+
+  it('counts only currently-visible required questions in progress', async () => {
+    const { service } = buildBranching();
+    const state = await service.loadState(TOKEN);
+    if (!state.ok) throw new Error('expected ok');
+    // Visible: q_gate, q_end (q_dep/q_s2 need q_gate='yes'; q_cascade needs q_s2)
+    expect(state.value.progress).toEqual({
+      currentSectionKey: null,
+      answeredCount: 0,
+      totalCount: 2,
+    });
+  });
+
+  it('reveals dependent questions when the gate answer is saved', async () => {
+    const { service } = buildBranching();
+    await service.loadState(TOKEN);
+    const result = await service.saveAnswers(TOKEN, {
+      q_gate: record({ type: 'multiple_choice', value: 'yes' }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Visible required: q_gate, q_dep, q_s2, q_end (q_cascade still hidden)
+    expect(result.value.progress).toEqual({
+      currentSectionKey: null,
+      answeredCount: 1,
+      totalCount: 4,
+    });
+  });
+
+  it('excludes hidden required questions from submit gating', async () => {
+    const { service } = buildBranching();
+    await service.loadState(TOKEN);
+    await service.saveAnswers(TOKEN, {
+      q_gate: record({ type: 'multiple_choice', value: 'no' }),
+      q_end: record({ type: 'free_text', value: 'done' }),
+    });
+    // q_dep, q_s2, q_cascade are required but hidden — submit must pass.
+    const result = await service.submit(TOKEN);
+    expect(result.ok).toBe(true);
+  });
+
+  it('blocks submit on visible required questions revealed by branching', async () => {
+    const { service } = buildBranching();
+    await service.loadState(TOKEN);
+    await service.saveAnswers(TOKEN, {
+      q_gate: record({ type: 'multiple_choice', value: 'yes' }),
+      q_end: record({ type: 'free_text', value: 'done' }),
+    });
+    const result = await service.submit(TOKEN);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('questionnaire/incomplete');
+    expect((result.error.detail as { missing: string[] }).missing.sort()).toEqual([
+      'q_dep',
+      'q_s2',
+    ]);
+  });
+
+  it('retains but flags answers hidden by flipping the gate (incl. cascade)', async () => {
+    const responses = new FakeResponses();
+    const { service } = buildBranching(responses);
+    await service.loadState(TOKEN);
+    // Answer everything down the 'yes' branch...
+    await service.saveAnswers(TOKEN, {
+      q_gate: record({ type: 'multiple_choice', value: 'yes' }),
+      q_dep: record({ type: 'likert', value: 4 }),
+      q_s2: record({ type: 'free_text', value: 'branch answer' }),
+      q_cascade: record({ type: 'free_text', value: 'cascade answer' }),
+      q_end: record({ type: 'free_text', value: 'done' }),
+    });
+    // ...then flip the gate: q_dep + q_s2 hide directly, q_cascade hides
+    // because the retained q_s2 answer no longer counts (cascading).
+    await service.saveAnswers(TOKEN, {
+      q_gate: record({ type: 'multiple_choice', value: 'no' }),
+    });
+    const result = await service.submit(TOKEN);
+    expect(result.ok).toBe(true);
+    const stored = responses.rows.get(SESSION_ID);
+    expect(stored?.answers.q_dep?.hidden).toBe(true);
+    expect(stored?.answers.q_s2?.hidden).toBe(true);
+    expect(stored?.answers.q_cascade?.hidden).toBe(true);
+    expect(stored?.answers.q_s2?.value).toBe('branch answer'); // retained
+    expect(stored?.answers.q_gate?.hidden).toBeUndefined();
+    expect(stored?.answers.q_end?.hidden).toBeUndefined();
+  });
+
+  it('rejects saving position on a section hidden by branching', async () => {
+    const { service } = buildBranching();
+    await service.loadState(TOKEN);
+    const hidden = await service.savePosition(TOKEN, 's2');
+    expect(hidden.ok).toBe(false);
+    if (hidden.ok) return;
+    expect(hidden.error.code).toBe('questionnaire/section_invalid');
+
+    await service.saveAnswers(TOKEN, {
+      q_gate: record({ type: 'multiple_choice', value: 'yes' }),
+    });
+    const visible = await service.savePosition(TOKEN, 's2');
+    expect(visible.ok).toBe(true);
   });
 });

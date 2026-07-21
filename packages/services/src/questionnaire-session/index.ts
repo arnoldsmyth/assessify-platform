@@ -7,4 +7,4 @@ export {
   type SaveAnswersOutcome,
   type SubmitOutcome,
 } from './questionnaire-session-service';
-export { alwaysVisible, type VisibilityEvaluator } from './visibility';
+export { alwaysVisible, showIfVisibility, type VisibilityEvaluator } from './visibility';

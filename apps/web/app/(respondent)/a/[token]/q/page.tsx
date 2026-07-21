@@ -68,7 +68,6 @@ export default async function QuestionnairePage({
       token={token}
       definition={state.value.definition}
       initialAnswers={state.value.answers}
-      initialProgress={state.value.progress}
       resumeSectionIndex={state.value.resumeSectionIndex}
     />
   );
