@@ -6,7 +6,7 @@ import type { AnswerRecord, AnswersMap } from '@assessify/domain';
 import { Button, Card, CardContent, CardHeader, CardTitle } from '@assessify/ui';
 
 import { saveAnswersAction, savePositionAction, submitAction } from '../actions';
-import { labelFromKey, type Definition } from '../_lib/renderer';
+import { labelFromKey, setTranslationStrings, type Definition } from '../_lib/renderer';
 import {
   computeVisibility,
   initialVisibleSectionIndex,
@@ -51,6 +51,8 @@ interface QuestionnaireRendererProps {
   initialAnswers: AnswersMap;
   /** Index into `definition.sections` (the server does not filter visibility). */
   resumeSectionIndex: number;
+  /** Server-resolved translation copy for the active language (asy-sex). */
+  strings: Record<string, string>;
 }
 
 export function QuestionnaireRenderer({
@@ -58,7 +60,14 @@ export function QuestionnaireRenderer({
   definition,
   initialAnswers,
   resumeSectionIndex,
+  strings,
 }: QuestionnaireRendererProps) {
+  // Register the resolved strings BEFORE anything renders a label: every
+  // labelFromKey call-site below and inside the per-type question components
+  // resolves through this module-level context (asy-sex). Re-registering on
+  // each render pass keeps a post-switch refresh in sync.
+  setTranslationStrings(strings);
+
   const [answers, setAnswers] = useState<AnswersMap>(initialAnswers);
   // Index into the VISIBLE section list (falls back to the nearest earlier
   // visible section when the resumed one is currently hidden by branching).
