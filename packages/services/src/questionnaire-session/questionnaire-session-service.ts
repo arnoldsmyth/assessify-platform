@@ -28,7 +28,7 @@ import type {
 
 import type { AuditService } from '../audit';
 import { saveIssues, submitIssues } from './answer-validation';
-import { alwaysVisible, type VisibilityEvaluator } from './visibility';
+import { showIfVisibility, type VisibilityEvaluator } from './visibility';
 
 /**
  * Questionnaire session service (C2 — spec 07 "Rendering & flow").
@@ -109,7 +109,7 @@ export interface QuestionnaireSessionServiceDeps {
   versions: QuestionnaireVersionRepository;
   responses: ResponseRepository;
   audit: AuditService;
-  /** C5 seam: `showIf` evaluation. Defaults to everything-visible. */
+  /** C5 seam: `showIf` evaluation. Defaults to the real branching evaluator. */
   visibility?: VisibilityEvaluator;
   now?: () => Date;
   newId?: () => string;
@@ -187,7 +187,7 @@ function visibleSections(
   answers: AnswersMap,
   visibility: VisibilityEvaluator
 ): Section[] {
-  return definition.sections.filter((s) => visibility.isSectionVisible(s, answers));
+  return definition.sections.filter((s) => visibility.isSectionVisible(definition, s, answers));
 }
 
 /** Currently-visible questions, flattened. */
@@ -197,7 +197,7 @@ function visibleQuestions(
   visibility: VisibilityEvaluator
 ): Question[] {
   return visibleSections(definition, answers, visibility).flatMap((section) =>
-    section.questions.filter((q) => visibility.isQuestionVisible(q, answers))
+    section.questions.filter((q) => visibility.isQuestionVisible(definition, q, answers))
   );
 }
 
@@ -244,7 +244,7 @@ export function createQuestionnaireSessionService(
   deps: QuestionnaireSessionServiceDeps
 ): QuestionnaireSessionService {
   const { access, sessions, versions, responses, audit } = deps;
-  const visibility = deps.visibility ?? alwaysVisible;
+  const visibility = deps.visibility ?? showIfVisibility;
   const now = deps.now ?? (() => new Date());
   const newId = deps.newId ?? uuidv7;
 
@@ -386,7 +386,7 @@ export function createQuestionnaireSessionService(
       const parsedKey = questionKeySchema.safeParse(sectionKey);
       if (!parsedKey.success) return err(sectionInvalid());
       const section = definition.sections.find((s) => s.key === parsedKey.data);
-      if (!section || !visibility.isSectionVisible(section, response.answers)) {
+      if (!section || !visibility.isSectionVisible(definition, section, response.answers)) {
         return err(sectionInvalid());
       }
 

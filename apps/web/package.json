@@ -12,6 +12,7 @@
   "dependencies": {
     "@assessify/adapters": "workspace:*",
     "@assessify/domain": "workspace:*",
+    "@assessify/questionnaire-schema": "workspace:*",
     "@assessify/services": "workspace:*",
     "@assessify/ui": "workspace:*",
     "better-auth": "^1.6.23",

@@ -1,12 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AnswerRecord, AnswersMap, ResponseProgress } from '@assessify/domain';
+import type { AnswerRecord, AnswersMap } from '@assessify/domain';
 import { Button, Card, CardContent, CardHeader, CardTitle } from '@assessify/ui';
 
 import { saveAnswersAction, savePositionAction, submitAction } from '../actions';
-import { labelFromKey, unansweredRequired, type Definition } from '../_lib/renderer';
+import { labelFromKey, type Definition } from '../_lib/renderer';
+import {
+  computeVisibility,
+  initialVisibleSectionIndex,
+  unansweredRequired,
+  visibleProgress,
+  visibleSectionQuestions,
+  visibleSections,
+  type ProgressCounts,
+} from '../_lib/visibility';
 import { QuestionInput } from './question-input';
 
 /**
@@ -21,10 +30,10 @@ import { QuestionInput } from './question-input';
  *   answered/total of currently-visible required questions.
  * - Resume: the server supplies `resumeSectionIndex` from the saved progress.
  * - Submit: review screen → server-side completeness validation → confirmation.
- *
- * Branching (C5) slots in server-side via the service's visibility evaluator;
- * this component renders whatever the definition + state say, so hiding
- * sections/questions client-side is an additive change here.
+ * - Branching (C5): `showIf` visibility is recomputed from local answers on
+ *   every change with the SAME pure evaluator the server uses, so hidden
+ *   sections/questions disappear reactively and progress/stepper only count
+ *   what is visible. The server stays authoritative at save/submit time.
  */
 
 const AUTOSAVE_DEBOUNCE_MS = 750;
@@ -40,7 +49,7 @@ interface QuestionnaireRendererProps {
   token: string;
   definition: Definition;
   initialAnswers: AnswersMap;
-  initialProgress: ResponseProgress;
+  /** Index into `definition.sections` (the server does not filter visibility). */
   resumeSectionIndex: number;
 }
 
@@ -48,13 +57,15 @@ export function QuestionnaireRenderer({
   token,
   definition,
   initialAnswers,
-  initialProgress,
   resumeSectionIndex,
 }: QuestionnaireRendererProps) {
   const [answers, setAnswers] = useState<AnswersMap>(initialAnswers);
-  const [sectionIndex, setSectionIndex] = useState(resumeSectionIndex);
+  // Index into the VISIBLE section list (falls back to the nearest earlier
+  // visible section when the resumed one is currently hidden by branching).
+  const [sectionIndex, setSectionIndex] = useState(() =>
+    initialVisibleSectionIndex(definition, initialAnswers, resumeSectionIndex)
+  );
   const [phase, setPhase] = useState<Phase>('sections');
-  const [progress, setProgress] = useState(initialProgress);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -87,7 +98,6 @@ export function QuestionnaireRenderer({
     try {
       const result = await saveAnswersAction(patch);
       if (result.ok) {
-        setProgress(result.value.progress);
         setSaveError(null);
         return true;
       }
@@ -129,7 +139,14 @@ export function QuestionnaireRenderer({
     return () => document.removeEventListener('visibilitychange', onHide);
   }, [flush]);
 
-  const sections = definition.sections;
+  // Branching (C5): recompute visibility from local answers on every change;
+  // sections/questions/progress below only ever reflect what is visible.
+  const visibility = useMemo(() => computeVisibility(definition, answers), [definition, answers]);
+  const sections = useMemo(() => visibleSections(definition, visibility), [definition, visibility]);
+  const progress = useMemo(
+    () => visibleProgress(definition, answers, visibility),
+    [definition, answers, visibility]
+  );
   const section = sections[Math.min(sectionIndex, sections.length - 1)];
   const allowBack = definition.settings.allowBack;
 
@@ -150,7 +167,11 @@ export function QuestionnaireRenderer({
 
   async function goNext() {
     if (!section) return;
-    const missing = unansweredRequired(section, answersRef.current);
+    const missing = unansweredRequired(
+      section,
+      answersRef.current,
+      computeVisibility(definition, answersRef.current)
+    );
     if (missing.length > 0) {
       // Section-level summary + per-question inline errors (spec 15: error
       // summary linked to fields — the inline slots carry the field half).
@@ -290,7 +311,7 @@ export function QuestionnaireRenderer({
           ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-8">
-          {section.questions.map((question) => {
+          {visibleSectionQuestions(section, visibility).map((question) => {
             // Stable ids let the per-type components wire aria-labelledby /
             // aria-describedby back to the text the renderer draws here.
             const labelId = `q-${question.key}-label`;
@@ -330,6 +351,7 @@ export function QuestionnaireRenderer({
               </div>
             );
           })}
+
 
           {gateMessage ? (
             <div role="alert" className="rounded-md border border-amber/30 bg-amber-tint px-4 py-3 text-sm text-amber">
@@ -391,7 +413,7 @@ function RendererShell({
   children,
 }: {
   title: string;
-  progress?: ResponseProgress | null;
+  progress?: ProgressCounts | null;
   stepper?: { sections: Definition['sections']; current: number };
   children: React.ReactNode;
 }) {

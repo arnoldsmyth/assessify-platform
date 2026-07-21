@@ -35,6 +35,9 @@ importers:
       '@assessify/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@assessify/questionnaire-schema':
+        specifier: workspace:*
+        version: link:../../packages/questionnaire-schema
       '@assessify/services':
         specifier: workspace:*
         version: link:../../packages/services

@@ -12,6 +12,7 @@ import {
   createQuestionnaireSessionService,
   type QuestionnaireSessionService,
 } from './questionnaire-session-service';
+import { showIfVisibility } from './visibility';
 
 // Module compiles with lib ES2022 (no @types/node in this package); declare
 // the bits of `process` the default wiring needs.
@@ -22,10 +23,9 @@ let instance: QuestionnaireSessionService | undefined;
 /**
  * Default composition-root wiring (same pattern as
  * `getRespondentAccessService`): Drizzle repositories over DATABASE_URL, the
- * C1 access service as the cookie-validation seam, and the default
- * everything-visible branching evaluator (C5 swaps the real `showIf`
- * evaluator in here). Lazy so importing @assessify/services never opens a
- * connection at module load (or during `next build`).
+ * C1 access service as the cookie-validation seam, and the real `showIf`
+ * branching evaluator (C5). Lazy so importing @assessify/services never opens
+ * a connection at module load (or during `next build`).
  */
 export function getQuestionnaireSessionService(): QuestionnaireSessionService {
   if (!instance) {
@@ -42,6 +42,7 @@ export function getQuestionnaireSessionService(): QuestionnaireSessionService {
       versions: createQuestionnaireVersionRepository(db),
       responses: createResponseRepository(connectionString),
       audit: createAuditService({ auditLogRepository: createAuditLogRepository(db) }),
+      visibility: showIfVisibility,
     });
   }
   return instance;

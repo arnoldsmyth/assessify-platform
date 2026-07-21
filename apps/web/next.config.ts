@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     '@assessify/adapters',
     '@assessify/db',
     '@assessify/domain',
+    '@assessify/questionnaire-schema',
     '@assessify/repositories',
     '@assessify/services',
     '@assessify/ui',
