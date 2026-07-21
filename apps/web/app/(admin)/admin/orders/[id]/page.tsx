@@ -22,6 +22,8 @@ import { OrderStatusBadge, SessionStatusBadge } from '../_components/status-badg
 import { TransitionPanel, type TransitionButton } from '../_components/transition-panel';
 import { dispatchInvitationsAction, resendInvitationAction } from './invitation-actions';
 import { DispatchInvitationsPanel, ResendInvitationButton } from './invitation-controls';
+import { sendReminderAction, setReminderSuppressionAction } from './reminder-actions';
+import { ReminderControls } from './reminder-controls';
 
 // Reads live data on every request — never prerendered at build time.
 export const dynamic = 'force-dynamic';
@@ -111,6 +113,12 @@ export default async function OrderDetailPage({
   const canResendInvitations =
     !order.suppressNotifications &&
     (order.status === 'approved' || order.status === 'sent' || order.status === 'email_error');
+  // D6 affordances: manual reminder + suppress/resume while the order is
+  // `sent` (spec 13 — reminders run only in that state). The service is the
+  // authority; these flags only decide what to render.
+  const reminderSendAction = sendReminderAction.bind(null, order.id);
+  const reminderSuppressAction = setReminderSuppressionAction.bind(null, order.id);
+  const canManageReminders = order.status === 'sent' && !order.suppressNotifications;
 
   return (
     <div className="flex flex-col gap-6">
@@ -155,6 +163,7 @@ export default async function OrderDetailPage({
                       <th className="px-4 py-2">Session</th>
                       <th className="px-4 py-2">Invited</th>
                       <th className="px-4 py-2">Completed</th>
+                      <th className="px-4 py-2">Reminders</th>
                       {canResendInvitations ? <th className="px-4 py-2">Invitation</th> : null}
                     </tr>
                   </thead>
@@ -183,6 +192,25 @@ export default async function OrderDetailPage({
                           {session.completedAt
                             ? session.completedAt.toISOString().slice(0, 10)
                             : '—'}
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted">
+                              {session.reminderCount > 0
+                                ? `${session.reminderCount} · ${session.lastReminderAt ? session.lastReminderAt.toISOString().slice(0, 10) : '—'}`
+                                : '—'}
+                              {session.remindersSuppressed ? ' (suppressed)' : ''}
+                            </span>
+                            {canManageReminders &&
+                            (session.status === 'invited' || session.status === 'started') ? (
+                              <ReminderControls
+                                sendAction={reminderSendAction}
+                                suppressAction={reminderSuppressAction}
+                                sessionId={session.id}
+                                suppressed={session.remindersSuppressed}
+                              />
+                            ) : null}
+                          </div>
                         </td>
                         {canResendInvitations ? (
                           <td className="px-4 py-2">

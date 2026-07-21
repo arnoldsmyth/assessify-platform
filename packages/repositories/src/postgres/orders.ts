@@ -319,6 +319,9 @@ export function createOrderRepository(db: Database): OrderRepository {
           invitedAt: respondentSessions.invitedAt,
           startedAt: respondentSessions.startedAt,
           completedAt: respondentSessions.completedAt,
+          reminderCount: respondentSessions.reminderCount,
+          lastReminderAt: respondentSessions.lastReminderAt,
+          remindersSuppressed: respondentSessions.remindersSuppressed,
           createdAt: respondentSessions.createdAt,
           respondentEmail: respondents.email,
           respondentFirstName: respondents.firstName,
@@ -339,6 +342,9 @@ export function createOrderRepository(db: Database): OrderRepository {
           invitedAt: row.invitedAt,
           startedAt: row.startedAt,
           completedAt: row.completedAt,
+          reminderCount: row.reminderCount,
+          lastReminderAt: row.lastReminderAt,
+          remindersSuppressed: row.remindersSuppressed,
           createdAt: row.createdAt,
           respondent:
             row.respondentId === null

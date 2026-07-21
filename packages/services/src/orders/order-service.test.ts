@@ -143,6 +143,9 @@ function makeRepo(seed: Order[] = []) {
         invitedAt: null,
         startedAt: null,
         completedAt: null,
+        reminderCount: 0,
+        lastReminderAt: null,
+        remindersSuppressed: false,
         createdAt: session.createdAt,
         respondent: {
           email: session.respondent.email,

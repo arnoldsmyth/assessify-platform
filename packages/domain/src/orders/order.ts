@@ -257,6 +257,10 @@ export interface OrderSessionSummary {
   invitedAt: Date | null;
   startedAt: Date | null;
   completedAt: Date | null;
+  /** Reminder-engine bookkeeping (D6 — spec 13): count, last send, opt-out. */
+  reminderCount: number;
+  lastReminderAt: Date | null;
+  remindersSuppressed: boolean;
   createdAt: Date;
   /** Null when the respondent was erased (PII deletion nulls the fields). */
   respondent: {

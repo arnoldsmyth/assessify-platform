@@ -35,13 +35,15 @@ export const repeatableJobs: readonly RepeatableJob[] = [
     repeat: { every: 5 * 60_000 },
     payload: {},
   }),
-  // Real schedules land with their epics, e.g.:
-  // define({
-  //   schedulerId: 'reminder-sweep',
-  //   jobName: 'reminders.sweep',
-  //   repeat: { pattern: '*/15 * * * *' },
-  //   payload: {},
-  // }),
+  // Reminder engine (D6 — spec 13): hourly sweep; the service applies the
+  // 2-day spacing / 30-day stop and defers sends outside the 08:00–18:00
+  // product-local window to a later tick, so hourly is the right resolution.
+  define({
+    schedulerId: 'reminder-sweep',
+    jobName: 'reminders.sweep',
+    repeat: { pattern: '0 * * * *' },
+    payload: {},
+  }),
 ];
 
 export async function registerRepeatableJobs(

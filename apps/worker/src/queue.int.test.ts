@@ -34,6 +34,7 @@ describe.runIf(connectionUrl !== undefined)('queue round trip (integration)', ()
       notifications: { service: undefined },
       scoring: { service: undefined },
       invitations: { service: undefined },
+      reminders: { service: undefined },
     });
     worker = new Worker(queueName, (job) => dispatchJob(registry, job), { connection });
   });

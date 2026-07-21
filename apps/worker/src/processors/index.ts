@@ -12,6 +12,7 @@ import { createHealthPingProcessor, type HealthPingDeps } from './health-ping';
 import { createHeartbeatProcessor } from './heartbeat';
 import { createInvitationsDispatchProcessor, type InvitationsDeps } from './invitations';
 import { createNotificationSendProcessor, type NotificationsDeps } from './notifications';
+import { createRemindersSweepProcessor, type RemindersDeps } from './reminders';
 import { createScoringDispatchProcessor, type ScoringDeps } from './scoring';
 
 export type ProcessorRegistry = {
@@ -23,6 +24,7 @@ export interface ProcessorDeps {
   notifications: NotificationsDeps;
   scoring: ScoringDeps;
   invitations: InvitationsDeps;
+  reminders: RemindersDeps;
 }
 
 export function createProcessorRegistry(deps: ProcessorDeps): ProcessorRegistry {
@@ -32,5 +34,6 @@ export function createProcessorRegistry(deps: ProcessorDeps): ProcessorRegistry 
     'notifications.send': createNotificationSendProcessor(deps.notifications),
     'scoring.dispatch': createScoringDispatchProcessor(deps.scoring),
     'invitations.dispatch': createInvitationsDispatchProcessor(deps.invitations),
+    'reminders.sweep': createRemindersSweepProcessor(deps.reminders),
   };
 }
