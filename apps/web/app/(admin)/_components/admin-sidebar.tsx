@@ -6,7 +6,12 @@ import { usePathname } from 'next/navigation';
 
 import { adminNavItems } from './nav-items';
 
-export function AdminSidebar() {
+export function AdminSidebar({
+  errorCount = 0,
+}: {
+  /** Open error-state orders (super admins only) — badge on "Error queue". */
+  errorCount?: number;
+}) {
   const pathname = usePathname();
 
   return (
@@ -36,6 +41,14 @@ export function AdminSidebar() {
                 >
                   <item.icon size={20} strokeWidth={1.75} aria-hidden="true" />
                   {item.label}
+                  {item.href === '/admin/errors' && errorCount > 0 ? (
+                    <span
+                      aria-label={`${errorCount} open error${errorCount === 1 ? '' : 's'}`}
+                      className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-red px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white"
+                    >
+                      {errorCount > 99 ? '99+' : errorCount}
+                    </span>
+                  ) : null}
                 </Link>
               </li>
             );

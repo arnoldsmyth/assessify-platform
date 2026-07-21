@@ -170,6 +170,17 @@ function makeRepo(seed: Order[] = []) {
       if (query.type) items = items.filter((o) => o.type === query.type);
       return { items: items.slice(query.offset, query.offset + query.limit), total: items.length };
     },
+    async listByStatuses(query) {
+      const items = [...rows.values()].filter((o) => query.statuses.includes(o.status));
+      return { items: items.slice(query.offset, query.offset + query.limit), total: items.length };
+    },
+    async countByStatuses(statuses) {
+      const counts: Partial<Record<Order['status'], number>> = {};
+      for (const order of rows.values()) {
+        if (statuses.includes(order.status)) counts[order.status] = (counts[order.status] ?? 0) + 1;
+      }
+      return counts;
+    },
   };
   return { repo, rows, sessionRows };
 }

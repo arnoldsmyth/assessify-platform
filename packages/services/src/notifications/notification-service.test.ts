@@ -66,6 +66,9 @@ function createFakeLogRepo() {
       rows.set(id, updated);
       return updated;
     },
+    async listByStatuses(statuses, limit) {
+      return [...rows.values()].filter((entry) => statuses.includes(entry.status)).slice(0, limit);
+    },
   };
   return {
     repo,

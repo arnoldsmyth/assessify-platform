@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 import { notificationLog, type Database } from '@assessify/db';
 import {
   notificationLogEntrySchema,
@@ -37,6 +37,15 @@ export interface NotificationLogRepository {
   markSent(id: string, providerMessageId: string | null): Promise<NotificationLogEntry | null>;
   /** Set the row's status (send failure or webhook event). Returns null when the row is gone. */
   updateStatus(id: string, status: NotificationStatus): Promise<NotificationLogEntry | null>;
+  /**
+   * Recent entries in any of the given statuses, newest first — the admin
+   * error queue's failed/bounced email view (D7 — spec 13 delivery-failure
+   * visibility). Read-only; resends go through their own flow (D5).
+   */
+  listByStatuses(
+    statuses: readonly NotificationStatus[],
+    limit: number
+  ): Promise<NotificationLogEntry[]>;
 }
 
 type NotificationLogRow = typeof notificationLog.$inferSelect;
@@ -116,6 +125,17 @@ export function createNotificationLogRepository(db: Database): NotificationLogRe
         .where(eq(notificationLog.id, id))
         .returning();
       return row ? toEntity(row) : null;
+    },
+
+    async listByStatuses(statuses, limit) {
+      if (statuses.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(notificationLog)
+        .where(inArray(notificationLog.status, [...statuses]))
+        .orderBy(desc(notificationLog.updatedAt), desc(notificationLog.id))
+        .limit(limit);
+      return rows.map(toEntity);
     },
   };
 }
