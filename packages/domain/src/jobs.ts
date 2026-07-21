@@ -50,11 +50,25 @@ export const notificationSendPayloadSchema = z.object({
   message: notificationRequestSchema,
 });
 
+/**
+ * Async scoring dispatch (spec 08 flow): `scoringService.dispatch(sessionId)`
+ * creates the `scoring_jobs` row (status `queued`) and enqueues this job; the
+ * worker processor hands the job id back to `scoringService.processJob`,
+ * which loads the submitted answers, calls the product's scoring adapter and
+ * applies the outcome. The payload is the job id only — answers are always
+ * re-read from the response store, never carried through Valkey.
+ */
+export const scoringDispatchPayloadSchema = z.object({
+  /** `scoring_jobs.id` created by the scoring service (also the dedupe key). */
+  jobId: z.string().uuid(),
+});
+
 /** Single source of truth mapping job name → payload schema. */
 export const jobPayloadSchemas = {
   'health.ping': healthPingPayloadSchema,
   'maintenance.heartbeat': heartbeatPayloadSchema,
   'notifications.send': notificationSendPayloadSchema,
+  'scoring.dispatch': scoringDispatchPayloadSchema,
 } as const;
 
 export type JobName = keyof typeof jobPayloadSchemas;

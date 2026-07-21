@@ -31,6 +31,19 @@ export interface RespondentSessionRepository {
    * session is completed or beyond.
    */
   markCompleted(id: string, at: Date): Promise<void>;
+  /**
+   * completed → awaiting_scores (scoring dispatched — spec 08 flow). No-op
+   * for sessions already awaiting scores or further along; returns whether a
+   * row transitioned.
+   */
+  markAwaitingScores(id: string, at: Date): Promise<boolean>;
+  /**
+   * completed/awaiting_scores/scored → scored: writes the validated ScoreSet
+   * to `scores` + `scored_at` (spec 08 applyScores; re-entry from `scored`
+   * supports admin re-scoring — raw answers are immutable). Returns whether a
+   * row was written.
+   */
+  applyScores(id: string, scores: Record<string, unknown>, at: Date): Promise<boolean>;
 }
 
 type SessionRow = typeof respondentSessions.$inferSelect;
@@ -94,6 +107,29 @@ export function createRespondentSessionRepository(
             inArray(respondentSessions.status, ['created', 'invited', 'started'])
           )
         );
+    },
+    async markAwaitingScores(id: string, at: Date) {
+      const rows = await db
+        .update(respondentSessions)
+        .set({ status: 'awaiting_scores', updatedAt: at })
+        .where(
+          and(eq(respondentSessions.id, id), eq(respondentSessions.status, 'completed'))
+        )
+        .returning({ id: respondentSessions.id });
+      return rows.length > 0;
+    },
+    async applyScores(id: string, scores: Record<string, unknown>, at: Date) {
+      const rows = await db
+        .update(respondentSessions)
+        .set({ status: 'scored', scores, scoredAt: at, updatedAt: at })
+        .where(
+          and(
+            eq(respondentSessions.id, id),
+            inArray(respondentSessions.status, ['completed', 'awaiting_scores', 'scored'])
+          )
+        )
+        .returning({ id: respondentSessions.id });
+      return rows.length > 0;
     },
   };
 }

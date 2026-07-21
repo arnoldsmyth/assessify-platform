@@ -63,6 +63,11 @@ export {
   type RespondentSessionRepository,
 } from './postgres/respondent-sessions';
 export {
+  createScoringJobRepository,
+  type ScoringJobCreate,
+  type ScoringJobRepository,
+} from './postgres/scoring-jobs';
+export {
   createInMemoryPinAttemptStore,
   type PinAttemptState,
   type PinAttemptStore,

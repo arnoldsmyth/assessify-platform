@@ -5,4 +5,5 @@ export * from './mailer/types';
 export * from './payment/types';
 export * from './pdf/types';
 export * from './queue/types';
+export * from './scoring/types';
 export * from './storage/types';

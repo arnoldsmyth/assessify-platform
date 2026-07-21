@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+import {
+  internalScoringDefinitionSchema,
+  scoringModeSchema,
+  scoringRetrievalModeSchema,
+} from '../scoring';
 import { brandingConfigSchema, type BrandingConfig } from './branding';
 
 /**
@@ -59,8 +64,17 @@ export type ReportPageSize = z.infer<typeof reportPageSizeSchema>;
 /** `products.scoring_config` shape per docs/spec/08-scoring-module.md. */
 export const scoringConfigSchema = z
   .object({
-    mode: z.enum(['sync_internal', 'async_external']),
+    mode: scoringModeSchema,
+    /**
+     * `async_external` result retrieval (owner update 2026-07-14): `callback`
+     * (engine POSTs to our webhook — E2) or `pull` (we poll the engine's API
+     * for the finished scores, e.g. the rebuilt PRO-D service). Defaults to
+     * `callback` when omitted.
+     */
+    retrieval: scoringRetrievalModeSchema.optional(),
     engineKey: z.string().trim().min(1).max(100).optional(),
+    /** Declarative definition for the internal scale-sum engine (spec 08). */
+    definition: internalScoringDefinitionSchema.optional(),
     endpoint: z.string().trim().url().optional(),
     auth: z
       .object({
