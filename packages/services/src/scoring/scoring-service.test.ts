@@ -29,7 +29,7 @@ const ANSWERED_AT = NOW.toISOString();
 const superAdmin: CallerContext = {
   kind: 'user',
   id: 'admin-1',
-  roles: [{ role: 'super_admin', productId: null, clientId: null, permissions: {
+  roles: [{ role: 'super_admin', organizationId: null, productId: null, clientId: null, permissions: {
     products: [], groups: [], canPlaceOrders: false, canViewResults: false, canReleaseReports: false,
   } }],
 };
@@ -210,9 +210,11 @@ function fakeVersion(): QuestionnaireVersion {
 function fakeProduct(scoringConfig: unknown): Product {
   return {
     id: PRODUCT_ID,
+    organizationId: '01890000-0000-7000-8000-0000000000a1',
     slug: 'pro-d',
     name: 'PRO-D',
     status: 'active',
+    defaultAccess: true,
     branding: {},
     defaultLanguage: 'en',
     availableLanguages: ['en'],
@@ -223,7 +225,6 @@ function fakeProduct(scoringConfig: unknown): Product {
     retailEnabled: false,
     retailPrice: null,
     retailCurrency: null,
-    connectedStripeAccountId: null,
     revenueSplitPct: null,
     royaltyPolicy: null,
     timezone: 'Europe/Dublin',

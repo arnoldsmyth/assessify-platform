@@ -4,14 +4,13 @@ import {
   createOrderSchema,
   err,
   findOrderTransition,
-  hasRole,
   isSuperAdmin,
   listOrdersQuerySchema,
   ok,
   orderEventsFrom,
   orderStatusSchema,
   orderTotals,
-  productScopeIds,
+  orgScopeIds,
   resolveOrderTransitionTarget,
   transitionOrderSchema,
   uuid4,
@@ -33,6 +32,7 @@ import type {
   NewOrderSession,
   OrderRepository,
   OrderStatusPatch,
+  ProductRepository,
 } from '@assessify/repositories';
 
 import type { AuditService } from '../audit';
@@ -76,6 +76,11 @@ export interface OrderService {
 
 export interface OrderServiceDeps {
   orders: OrderRepository;
+  /**
+   * Resolves an order's product to its organization for org-scoped
+   * assessment_admin visibility (M2 re-scope, owner decisions 2026-07-21).
+   */
+  products: ProductRepository;
   audit: AuditService;
   now?: () => Date;
   generateId?: () => string;
@@ -158,13 +163,14 @@ function canPlaceOrderFor(caller: CallerContext, clientId: string): boolean {
   );
 }
 
-/** May the caller read this order? */
-function canViewOrder(caller: CallerContext, order: Order): boolean {
-  if (caller.kind === 'system') return true;
+/**
+ * May the caller read this order — client-scoped roles only. Org-scoped
+ * assessment_admin visibility needs the product's organization and is
+ * resolved by the service (async product lookup).
+ */
+function canViewOrderViaClientScope(caller: CallerContext, order: Order): boolean {
   if (caller.kind !== 'user') return false;
-  if (isSuperAdmin(caller)) return true;
   return caller.roles.some((a) => {
-    if (a.role === 'assessment_admin') return a.productId === order.productId;
     if (a.role === 'client_admin') return a.clientId === order.clientId;
     if (a.role === 'client_user')
       return (
@@ -202,10 +208,24 @@ function transitionActorTags(caller: CallerContext, orderClientId: string): Orde
 // ---------------------------------------------------------------------------
 
 export function createOrderService(deps: OrderServiceDeps): OrderService {
-  const { orders, audit } = deps;
+  const { orders, products, audit } = deps;
   const now = deps.now ?? (() => new Date());
   const generateId = deps.generateId ?? uuidv7;
   const generateToken = deps.generateToken ?? uuid4;
+
+  /** May the caller read this order? (spec 05, org re-scope 2026-07-21) */
+  async function canViewOrder(caller: CallerContext, order: Order): Promise<boolean> {
+    if (caller.kind === 'system') return true;
+    if (caller.kind !== 'user') return false;
+    if (isSuperAdmin(caller)) return true;
+    if (canViewOrderViaClientScope(caller, order)) return true;
+    // Org-scoped assessment_admin: the order's product must belong to one of
+    // the caller's organizations.
+    const orgScope = orgScopeIds(caller);
+    if (orgScope.length === 0) return false;
+    const product = await products.findById(order.productId);
+    return product !== null && orgScope.includes(product.organizationId);
+  }
 
   return {
     async create(caller, input) {
@@ -317,7 +337,7 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
       const order = await orders.findById(orderId);
       if (!order) return err(notFound(orderId));
       // Hide existence from callers who cannot even view the order.
-      if (!canViewOrder(caller, order)) return err(notFound(orderId));
+      if (!(await canViewOrder(caller, order))) return err(notFound(orderId));
 
       const rule = findOrderTransition(order.status, event);
       if (!rule) return err(illegalTransition(order.status, event));
@@ -392,7 +412,7 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
       if (!UUID_RE.test(orderId)) return err(notFound(orderId));
       const order = await orders.findById(orderId);
       if (!order) return err(notFound(orderId));
-      if (!canViewOrder(caller, order)) return err(notFound(orderId));
+      if (!(await canViewOrder(caller, order))) return err(notFound(orderId));
       const [items, sessions] = await Promise.all([
         orders.findItems(orderId),
         orders.findSessions(orderId),
@@ -405,7 +425,7 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
       const order = await orders.findById(orderId);
       if (!order) return err(notFound(orderId));
       // Same visibility rule as get — hide existence from out-of-scope callers.
-      if (!canViewOrder(caller, order)) return err(notFound(orderId));
+      if (!(await canViewOrder(caller, order))) return err(notFound(orderId));
       return audit.listByEntity({ type: 'order', id: orderId }, { limit: 100 });
     },
 
@@ -414,23 +434,25 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
       if (!parsed.success) {
         return err(validationError(zodIssues(parsed.error.issues), 'Order query failed validation'));
       }
-      const { page, pageSize, clientId, productId, status, type } = parsed.data;
+      const { page, pageSize, clientId, productId, organizationId, status, type } = parsed.data;
 
       // Scope enforcement: non-super-admin users must query within their own
-      // client/product scope; the query is rejected rather than silently
-      // widened (spec 05 — UUID knowledge is never sufficient).
+      // client/organization scope; the query is rejected rather than silently
+      // widened (spec 05 — UUID knowledge is never sufficient). Org-scoped
+      // assessment_admins query by organizationId (M2 re-scope); a productId
+      // filter alone no longer authorizes anything.
       if (caller.kind !== 'system' && !(caller.kind === 'user' && isSuperAdmin(caller))) {
         if (caller.kind !== 'user') return err(forbiddenOrder({ action: 'list' }));
         const clientScope = clientScopeIds(caller);
-        const productScope = productScopeIds(caller);
+        const orgScope = orgScopeIds(caller);
         const clientOk = clientId !== undefined && clientScope.includes(clientId);
-        const productOk =
-          hasRole(caller, 'assessment_admin') &&
-          productId !== undefined &&
-          productScope.includes(productId);
-        if (!clientOk && !productOk) {
+        const orgOk = organizationId !== undefined && orgScope.includes(organizationId);
+        if (!clientOk && !orgOk) {
           return err(
-            forbiddenOrder({ action: 'list', reason: 'query_must_be_scoped_to_own_client_or_product' })
+            forbiddenOrder({
+              action: 'list',
+              reason: 'query_must_be_scoped_to_own_client_or_organization',
+            })
           );
         }
       }
@@ -438,6 +460,7 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
       const result = await orders.list({
         clientId,
         productId,
+        organizationId,
         status,
         type,
         limit: pageSize,

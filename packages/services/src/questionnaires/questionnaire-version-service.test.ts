@@ -12,14 +12,17 @@ import { createQuestionnaireVersionService } from './questionnaire-version-servi
 
 const PRODUCT_ID = '01890000-0000-7000-8000-000000000001';
 const OTHER_PRODUCT_ID = '01890000-0000-7000-8000-000000000002';
+const ORG_ID = '01890000-0000-7000-8000-0000000000a1';
+const OTHER_ORG_ID = '01890000-0000-7000-8000-0000000000a2';
 
 function assignment(
   role: RoleAssignment['role'],
-  scope: { productId?: string; clientId?: string } = {}
+  scope: { organizationId?: string; clientId?: string } = {}
 ): RoleAssignment {
   return {
     role,
-    productId: scope.productId ?? null,
+    organizationId: scope.organizationId ?? null,
+    productId: null,
     clientId: scope.clientId ?? null,
     permissions: {
       products: [],
@@ -36,15 +39,17 @@ const superAdmin: CallerContext = {
   id: '11111111-1111-7111-8111-111111111111',
   roles: [assignment('super_admin')],
 };
+// assessment_admin is org-scoped (M2): "may manage this product" resolves
+// through the product's organization.
 const productAdmin: CallerContext = {
   kind: 'user',
   id: '22222222-2222-7222-8222-222222222222',
-  roles: [assignment('assessment_admin', { productId: PRODUCT_ID })],
+  roles: [assignment('assessment_admin', { organizationId: ORG_ID })],
 };
 const otherProductAdmin: CallerContext = {
   kind: 'user',
   id: '44444444-4444-7444-8444-444444444444',
-  roles: [assignment('assessment_admin', { productId: OTHER_PRODUCT_ID })],
+  roles: [assignment('assessment_admin', { organizationId: OTHER_ORG_ID })],
 };
 const clientAdmin: CallerContext = {
   kind: 'user',
@@ -55,9 +60,11 @@ const clientAdmin: CallerContext = {
 function fixtureProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: PRODUCT_ID,
+    organizationId: ORG_ID,
     slug: 'pro-d',
     name: 'PRO-D',
     status: 'active',
+    defaultAccess: true,
     branding: {},
     defaultLanguage: 'en',
     availableLanguages: ['en'],
@@ -68,7 +75,6 @@ function fixtureProduct(overrides: Partial<Product> = {}): Product {
     retailEnabled: false,
     retailPrice: null,
     retailCurrency: null,
-    connectedStripeAccountId: null,
     revenueSplitPct: null,
     royaltyPolicy: null,
     timezone: 'Europe/Dublin',

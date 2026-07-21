@@ -6,6 +6,8 @@ import { createClientDirectoryService } from './client-directory-service';
 
 const CLIENT_A = '33333333-3333-7333-8333-333333333333';
 const CLIENT_B = '44444444-4444-7444-8444-444444444444';
+const ORG_A = '66666666-6666-7666-8666-666666666666';
+const OTHER_ORG = '77777777-7777-7777-8777-777777777777';
 
 function assignment(
   role: RoleAssignment['role'],
@@ -13,6 +15,7 @@ function assignment(
 ): RoleAssignment {
   return {
     role,
+    organizationId: null,
     productId: null,
     clientId: null,
     permissions: {
@@ -32,8 +35,8 @@ const superAdmin: CallerContext = {
   roles: [assignment('super_admin')],
 };
 
-function summary(id: string, name: string): ClientSummary {
-  return { id, clientNumber: 1, name, defaultCurrency: 'EUR', isPlatformRetail: false };
+function summary(id: string, name: string, organizationId: string = ORG_A): ClientSummary {
+  return { id, organizationId, clientNumber: 1, name, defaultCurrency: 'EUR' };
 }
 
 function makeService(seed: ClientSummary[]) {
@@ -43,6 +46,9 @@ function makeService(seed: ClientSummary[]) {
     },
     async findByIds(ids) {
       return seed.filter((client) => ids.includes(client.id));
+    },
+    async listByOrganizationIds(organizationIds) {
+      return seed.filter((client) => organizationIds.includes(client.organizationId));
     },
   };
   return createClientDirectoryService({ clients: repo });
@@ -100,5 +106,29 @@ describe('clientDirectoryService.listPlaceable', () => {
     const result = await makeService(seed).listPlaceable(systemCallerContext());
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('client/forbidden');
+  });
+});
+
+describe('clientDirectoryService org scoping (M2)', () => {
+  const orgAdmin: CallerContext = {
+    kind: 'user',
+    id: '88888888-8888-7888-8888-888888888888',
+    roles: [assignment('assessment_admin', { organizationId: ORG_A })],
+  };
+
+  it('org admins see all of their organization’s clients in listVisible', async () => {
+    const mixedOrgs = [
+      summary(CLIENT_A, 'Acme', ORG_A),
+      summary(CLIENT_B, 'Globex', OTHER_ORG),
+    ];
+    const result = await makeService(mixedOrgs).listVisible(orgAdmin);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.map((c) => c.id)).toEqual([CLIENT_A]);
+  });
+
+  it('org admins get nothing from listPlaceable (read-only scope)', async () => {
+    const result = await makeService(seed).listPlaceable(orgAdmin);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual([]);
   });
 });

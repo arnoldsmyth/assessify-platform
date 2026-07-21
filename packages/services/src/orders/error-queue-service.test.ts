@@ -36,6 +36,7 @@ function assignment(
 ): RoleAssignment {
   return {
     role,
+    organizationId: null,
     productId: null,
     clientId: null,
     permissions: {
@@ -62,7 +63,7 @@ const clientAdmin: CallerContext = {
 const assessmentAdmin: CallerContext = {
   kind: 'user',
   id: '88888888-8888-7888-8888-888888888888',
-  roles: [assignment('assessment_admin', { productId: PRODUCT_ID })],
+  roles: [assignment('assessment_admin', { organizationId: '01890000-0000-7000-8000-0000000000a1' })],
 };
 const apiKeyCaller: CallerContext = {
   kind: 'api_key',
@@ -156,12 +157,15 @@ function makeDeps(overrides: {
     async findByIds(ids) {
       const summary: ClientSummary = {
         id: CLIENT_ID,
+        organizationId: '01890000-0000-7000-8000-0000000000a1',
         clientNumber: 7,
         name: 'Acme Talent',
         defaultCurrency: 'EUR',
-        isPlatformRetail: false,
       };
       return ids.includes(CLIENT_ID) ? [summary] : [];
+    },
+    async listByOrganizationIds() {
+      return [];
     },
   };
 

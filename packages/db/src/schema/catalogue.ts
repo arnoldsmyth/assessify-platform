@@ -13,10 +13,17 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-// Tenancy & catalogue (04 — Data Model)
+import { organizations } from './organizations';
+
+// Tenancy & catalogue (04 — Data Model; org hierarchy per owner decisions
+// 2026-07-21: Platform → Organization → Client → Assessment taker)
 
 export const products = pgTable('products', {
   id: uuid('id').primaryKey(),
+  /** Owning organization (product owner company). */
+  organizationId: uuid('organization_id')
+    .notNull()
+    .references(() => organizations.id),
   /** used for {slug}.assessify.ie */
   slug: text('slug').unique().notNull(),
   name: text('name').notNull(),
@@ -34,11 +41,15 @@ export const products = pgTable('products', {
   notificationDefaults: jsonb('notification_defaults').notNull().default({}),
   /** 'a4' | 'letter' */
   reportPageSizeDefault: text('report_page_size_default').notNull().default('a4'),
+  /**
+   * True = org-default: available to all the org's clients. False =
+   * restricted: only clients with a `client_product_access` grant.
+   */
+  defaultAccess: boolean('default_access').notNull().default(true),
   retailEnabled: boolean('retail_enabled').notNull().default(false),
   retailPrice: bigint('retail_price', { mode: 'number' }),
   retailCurrency: char('retail_currency', { length: 3 }),
-  /** Stripe Connect (day-one field, transfers in phase 2) */
-  connectedStripeAccountId: text('connected_stripe_account_id'),
+  /** Royalty RATES stay per product; settlement identity is on the org. */
   revenueSplitPct: numeric('revenue_split_pct', { precision: 5, scale: 2 }),
   /** {method, pctNet?, fixedAmount?, hybrid?, settlement, period, externalIdKey} */
   royaltyPolicy: jsonb('royalty_policy'),
@@ -83,6 +94,30 @@ export const reportTemplateVersions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique().on(t.productId, t.version)]
+);
+
+/**
+ * Org-set price list per language edition (owner decision 2026-07-21):
+ * PLATFORM creates products; ORGS price them per (language, currency) — e.g.
+ * PRO-D Premium English vs Spanish priced differently. Deliberately NOT on
+ * `questionnaire_versions.variant` (that axis is rater variants: self/manager).
+ */
+export const productPrices = pgTable(
+  'product_prices',
+  {
+    id: uuid('id').primaryKey(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    /** BCP47 language tag — must be one of the product's available languages. */
+    language: text('language').notNull(),
+    currency: char('currency', { length: 3 }).notNull(),
+    /** Integer minor units (spec 04 money convention). */
+    unitPrice: bigint('unit_price', { mode: 'number' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique().on(t.productId, t.language, t.currency)]
 );
 
 export const translationStrings = pgTable(

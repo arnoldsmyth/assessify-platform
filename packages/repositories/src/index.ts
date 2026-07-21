@@ -39,6 +39,20 @@ export {
   type ClientSummary,
 } from './postgres/clients';
 export {
+  createOrganizationRepository,
+  type OrganizationPatch,
+  type OrganizationRepository,
+} from './postgres/organizations';
+export {
+  createProductPriceRepository,
+  type ProductPriceRepository,
+  type UpsertProductPriceRow,
+} from './postgres/product-prices';
+export {
+  createClientProductAccessRepository,
+  type ClientProductAccessRepository,
+} from './postgres/client-product-access';
+export {
   createNotificationLogRepository,
   type NotificationLogCreate,
   type NotificationLogRepository,

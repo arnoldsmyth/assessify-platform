@@ -38,14 +38,14 @@ export default async function NewOrderPage() {
     );
   }
 
-  const clients: WizardClient[] = clientsResult.value
-    .filter((client) => !client.isPlatformRetail)
-    .map((client) => ({
-      id: client.id,
-      name: client.name,
-      clientNumber: client.clientNumber,
-      defaultCurrency: client.defaultCurrency,
-    }));
+  // No retail-umbrella exclusion any more (owner decision 2026-07-21: direct
+  // sales become an ordinary client) — every placeable client is offered.
+  const clients: WizardClient[] = clientsResult.value.map((client) => ({
+    id: client.id,
+    name: client.name,
+    clientNumber: client.clientNumber,
+    defaultCurrency: client.defaultCurrency,
+  }));
 
   // Resolve each product's active 'self' questionnaire version — the wizard
   // pins it on the order (spec 06). Products without one are shown disabled.

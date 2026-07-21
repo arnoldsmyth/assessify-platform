@@ -2,6 +2,7 @@
 export * from './enums';
 export * from './sequences';
 export * from './auth';
+export * from './organizations';
 export * from './catalogue';
 export * from './parties';
 export * from './orders';

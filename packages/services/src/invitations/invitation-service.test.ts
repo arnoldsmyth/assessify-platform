@@ -82,9 +82,11 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
 function makeProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: PRODUCT_ID,
+    organizationId: '01890000-0000-7000-8000-0000000000a1',
     slug: 'pro-d',
     name: 'Pro-D',
     status: 'active',
+    defaultAccess: true,
     branding: {},
     defaultLanguage: 'en',
     availableLanguages: ['en', 'de'],
@@ -95,7 +97,6 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     retailEnabled: false,
     retailPrice: null,
     retailCurrency: null,
-    connectedStripeAccountId: null,
     revenueSplitPct: null,
     royaltyPolicy: null,
     timezone: 'Europe/Dublin',
@@ -129,7 +130,7 @@ const fullPermissions = {
 const superAdmin: CallerContext = {
   kind: 'user',
   id: '01890a5d-ac96-774b-bcce-b302099a0100',
-  roles: [{ role: 'super_admin', productId: null, clientId: null, permissions: fullPermissions }],
+  roles: [{ role: 'super_admin', organizationId: null, productId: null, clientId: null, permissions: fullPermissions }],
 };
 
 const otherClientAdmin: CallerContext = {
@@ -138,6 +139,7 @@ const otherClientAdmin: CallerContext = {
   roles: [
     {
       role: 'client_admin',
+      organizationId: null,
       productId: null,
       clientId: '01890a5d-ac96-774b-bcce-b302099a0999',
       permissions: fullPermissions,

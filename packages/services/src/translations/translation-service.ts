@@ -3,11 +3,12 @@ import {
   isSuperAdmin,
   languageTagSchema,
   ok,
-  productScopeIds,
+  orgScopeIds,
   translationKeySchema,
   type AuditActor,
   type CallerContext,
   type DomainError,
+  type Product,
   type Result,
   type TranslationString,
 } from '@assessify/domain';
@@ -33,8 +34,9 @@ import { collectTranslationKeys } from './translation-keys';
  * fallback is the expected steady state for partially translated products.
  *
  * Authorization (spec 05 permission matrix — assessment_admin "manage
- * questionnaire/report versions and translations for their product"):
- * super_admin, or assessment_admin scoped to the product. `resolve` is
+ * questionnaire/report versions and translations", re-scoped per owner
+ * decisions 2026-07-21): super_admin, or assessment_admin scoped to the
+ * product's ORGANIZATION. `resolve` is
  * intentionally caller-free: it serves the respondent renderer (C2), which
  * has no admin caller — translation strings are respondent-facing copy, not
  * sensitive data.
@@ -148,10 +150,13 @@ function forbidden(caller: CallerContext): DomainError {
   };
 }
 
-/** Spec 05: manage translations = super_admin or assessment_admin of the product. */
-function canManage(caller: CallerContext, productId: string): boolean {
+/**
+ * Spec 05 re-scoped (M2, owner decisions 2026-07-21): manage translations =
+ * super_admin, or assessment_admin of the product's organization.
+ */
+function canManage(caller: CallerContext, product: Product): boolean {
   if (isSuperAdmin(caller)) return true;
-  return caller.kind === 'user' && productScopeIds(caller).includes(productId);
+  return caller.kind === 'user' && orgScopeIds(caller).includes(product.organizationId);
 }
 
 function productNotFound(productId: string): DomainError {
@@ -205,10 +210,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       }
       const { productId, language, strings } = parsed.data;
 
-      if (!canManage(caller, productId)) return err(forbidden(caller));
-
       const product = await products.findById(productId);
       if (!product) return err(productNotFound(productId));
+      if (!canManage(caller, product)) return err(forbidden(caller));
 
       // Languages are declared on the product first (spec 04
       // `products.available_languages`) — an import for an undeclared
@@ -289,10 +293,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       if (!UUID_RE.test(questionnaireVersionId)) return err(versionNotFound(questionnaireVersionId));
       const version = await questionnaireVersions.findById(questionnaireVersionId);
       if (!version) return err(versionNotFound(questionnaireVersionId));
-      if (!canManage(caller, version.productId)) return err(forbidden(caller));
 
       const product = await products.findById(version.productId);
       if (!product) return err(productNotFound(version.productId));
+      if (!canManage(caller, product)) return err(forbidden(caller));
 
       const keys = collectTranslationKeys(version.definition);
 

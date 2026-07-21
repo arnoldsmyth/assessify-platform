@@ -178,6 +178,8 @@ export type TransitionOrder = z.output<typeof transitionOrderSchema>;
 export const listOrdersQuerySchema = z.object({
   clientId: z.string().uuid().optional(),
   productId: z.string().uuid().optional(),
+  /** Orders of the org's products — how org-scoped assessment_admins query (M2). */
+  organizationId: z.string().uuid().optional(),
   status: orderStatusSchema.optional(),
   type: orderTypeSchema.optional(),
   page: z.number().int().min(1).default(1),

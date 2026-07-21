@@ -21,9 +21,11 @@ type ProductInsertRow = typeof products.$inferInsert;
 function toEntity(row: ProductRow): Product {
   return {
     id: row.id,
+    organizationId: row.organizationId,
     slug: row.slug,
     name: row.name,
     status: row.status as ProductStatus,
+    defaultAccess: row.defaultAccess,
     branding: (row.branding ?? {}) as BrandingConfig,
     defaultLanguage: row.defaultLanguage,
     availableLanguages: row.availableLanguages,
@@ -34,7 +36,6 @@ function toEntity(row: ProductRow): Product {
     retailEnabled: row.retailEnabled,
     retailPrice: row.retailPrice,
     retailCurrency: row.retailCurrency,
-    connectedStripeAccountId: row.connectedStripeAccountId,
     revenueSplitPct: row.revenueSplitPct === null ? null : Number(row.revenueSplitPct),
     royaltyPolicy:
       row.royaltyPolicy === null || row.royaltyPolicy === undefined
@@ -49,9 +50,11 @@ function toEntity(row: ProductRow): Product {
 function toInsertRow(product: Product): ProductInsertRow {
   return {
     id: product.id,
+    organizationId: product.organizationId,
     slug: product.slug,
     name: product.name,
     status: product.status,
+    defaultAccess: product.defaultAccess,
     branding: product.branding,
     defaultLanguage: product.defaultLanguage,
     availableLanguages: product.availableLanguages,
@@ -62,7 +65,6 @@ function toInsertRow(product: Product): ProductInsertRow {
     retailEnabled: product.retailEnabled,
     retailPrice: product.retailPrice,
     retailCurrency: product.retailCurrency,
-    connectedStripeAccountId: product.connectedStripeAccountId,
     revenueSplitPct: product.revenueSplitPct === null ? null : product.revenueSplitPct.toFixed(2),
     royaltyPolicy: product.royaltyPolicy,
     timezone: product.timezone,
@@ -73,9 +75,11 @@ function toInsertRow(product: Product): ProductInsertRow {
 
 function toPatchRow(patch: ProductPatch): Partial<ProductInsertRow> {
   const row: Partial<ProductInsertRow> = {};
+  if (patch.organizationId !== undefined) row.organizationId = patch.organizationId;
   if (patch.slug !== undefined) row.slug = patch.slug;
   if (patch.name !== undefined) row.name = patch.name;
   if (patch.status !== undefined) row.status = patch.status;
+  if (patch.defaultAccess !== undefined) row.defaultAccess = patch.defaultAccess;
   if (patch.branding !== undefined) row.branding = patch.branding;
   if (patch.defaultLanguage !== undefined) row.defaultLanguage = patch.defaultLanguage;
   if (patch.availableLanguages !== undefined) row.availableLanguages = patch.availableLanguages;
@@ -88,8 +92,6 @@ function toPatchRow(patch: ProductPatch): Partial<ProductInsertRow> {
   if (patch.retailEnabled !== undefined) row.retailEnabled = patch.retailEnabled;
   if (patch.retailPrice !== undefined) row.retailPrice = patch.retailPrice;
   if (patch.retailCurrency !== undefined) row.retailCurrency = patch.retailCurrency;
-  if (patch.connectedStripeAccountId !== undefined)
-    row.connectedStripeAccountId = patch.connectedStripeAccountId;
   if (patch.revenueSplitPct !== undefined)
     row.revenueSplitPct = patch.revenueSplitPct === null ? null : patch.revenueSplitPct.toFixed(2);
   if (patch.royaltyPolicy !== undefined) row.royaltyPolicy = patch.royaltyPolicy;

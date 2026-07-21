@@ -14,7 +14,11 @@ import {
   type Result,
   type UpdateProduct,
 } from '@assessify/domain';
-import type { ProductPatch, ProductRepository } from '@assessify/repositories';
+import type {
+  OrganizationRepository,
+  ProductPatch,
+  ProductRepository,
+} from '@assessify/repositories';
 
 import type { AuditService } from '../audit';
 
@@ -66,6 +70,8 @@ export interface ProductService {
 
 export interface ProductServiceDeps {
   products: ProductRepository;
+  /** Existence check for the owning organization on create. */
+  organizations: OrganizationRepository;
   audit: AuditService;
   now?: () => Date;
   generateId?: () => string;
@@ -135,7 +141,7 @@ function definedFields(patch: UpdateProduct): UpdateProduct {
 }
 
 export function createProductService(deps: ProductServiceDeps): ProductService {
-  const { products, audit } = deps;
+  const { products, organizations, audit } = deps;
   const now = deps.now ?? (() => new Date());
   const generateId = deps.generateId ?? uuidv7;
 
@@ -150,6 +156,17 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
       const parsed = createProductSchema.safeParse(input);
       if (!parsed.success) return err(validationError(zodIssues(parsed.error.issues)));
 
+      // Products belong to an organization (owner decision 2026-07-21) —
+      // friendly error before the FK backstop.
+      const organization = await organizations.findById(parsed.data.organizationId);
+      if (!organization) {
+        return err({
+          code: 'product/organization_not_found',
+          message: 'Organization not found',
+          detail: { organizationId: parsed.data.organizationId },
+        });
+      }
+
       // Pre-check for a friendly error; the DB unique constraint remains the
       // backstop for the create/create race (that path throws — unexpected).
       if (await products.findBySlug(parsed.data.slug)) return err(slugTaken(parsed.data.slug));
@@ -157,9 +174,11 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
       const timestamp = now();
       const product: Product = {
         id: generateId(),
+        organizationId: parsed.data.organizationId,
         slug: parsed.data.slug,
         name: parsed.data.name,
         status: 'active',
+        defaultAccess: parsed.data.defaultAccess,
         branding: parsed.data.branding,
         defaultLanguage: parsed.data.defaultLanguage,
         availableLanguages: parsed.data.availableLanguages,
@@ -170,7 +189,6 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
         retailEnabled: parsed.data.retailEnabled,
         retailPrice: parsed.data.retailPrice ?? null,
         retailCurrency: parsed.data.retailCurrency ?? null,
-        connectedStripeAccountId: null,
         revenueSplitPct: null,
         royaltyPolicy: null,
         timezone: parsed.data.timezone,

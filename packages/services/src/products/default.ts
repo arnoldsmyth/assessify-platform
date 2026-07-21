@@ -1,5 +1,6 @@
 import {
   createAuditLogRepository,
+  createOrganizationRepository,
   DrizzleProductRepository,
   getDbHandle,
 } from '@assessify/repositories';
@@ -29,6 +30,7 @@ export function getProductService(): ProductService {
     const { db } = getDbHandle(connectionString);
     instance = createProductService({
       products: new DrizzleProductRepository(db),
+      organizations: createOrganizationRepository(db),
       audit: createAuditService({ auditLogRepository: createAuditLogRepository(db) }),
     });
   }

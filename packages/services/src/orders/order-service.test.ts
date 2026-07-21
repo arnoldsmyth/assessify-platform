@@ -7,7 +7,12 @@ import {
   type OrderItem,
   type RoleAssignment,
 } from '@assessify/domain';
-import type { NewOrderItem, NewOrderSession, OrderRepository } from '@assessify/repositories';
+import type {
+  NewOrderItem,
+  NewOrderSession,
+  OrderRepository,
+  ProductRepository,
+} from '@assessify/repositories';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuditService } from '../audit';
@@ -16,6 +21,8 @@ import { createOrderService } from './order-service';
 const CLIENT_ID = '33333333-3333-7333-8333-333333333333';
 const OTHER_CLIENT_ID = '44444444-4444-7444-8444-444444444444';
 const PRODUCT_ID = '55555555-5555-7555-8555-555555555555';
+const ORG_ID = '01890000-0000-7000-8000-0000000000a1';
+const OTHER_ORG_ID = '01890000-0000-7000-8000-0000000000a2';
 const QV_ID = '66666666-6666-7666-8666-666666666666';
 const ORDER_ID = '01890000-0000-7000-8000-000000000042';
 
@@ -25,6 +32,7 @@ function assignment(
 ): RoleAssignment {
   return {
     role,
+    organizationId: null,
     productId: null,
     clientId: null,
     permissions: {
@@ -166,6 +174,12 @@ function makeRepo(seed: Order[] = []) {
       let items = [...rows.values()];
       if (query.clientId) items = items.filter((o) => o.clientId === query.clientId);
       if (query.productId) items = items.filter((o) => o.productId === query.productId);
+      if (query.organizationId) {
+        // Mirrors the SQL products-subquery: only PRODUCT_ID belongs to ORG_ID.
+        items = items.filter(
+          (o) => query.organizationId === ORG_ID && o.productId === PRODUCT_ID
+        );
+      }
       if (query.status) items = items.filter((o) => o.status === query.status);
       if (query.type) items = items.filter((o) => o.type === query.type);
       return { items: items.slice(query.offset, query.offset + query.limit), total: items.length };
@@ -183,6 +197,25 @@ function makeRepo(seed: Order[] = []) {
     },
   };
   return { repo, rows, sessionRows };
+}
+
+/**
+ * Product resolver double: the order's product (PRODUCT_ID) belongs to
+ * ORG_ID — enough for the org-scoped assessment_admin visibility checks.
+ */
+function makeProductsRepo(): ProductRepository {
+  return {
+    async findById(id: string) {
+      if (id !== PRODUCT_ID) return null;
+      return { id: PRODUCT_ID, organizationId: ORG_ID } as Awaited<
+        ReturnType<ProductRepository['findById']>
+      >;
+    },
+    findBySlug: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    list: vi.fn(),
+  } as unknown as ProductRepository;
 }
 
 function makeAudit(): AuditService {
@@ -206,6 +239,7 @@ function makeService(seed: Order[] = []) {
   const audit = makeAudit();
   const service = createOrderService({
     orders: repo,
+    products: makeProductsRepo(),
     audit,
     now: () => new Date('2026-07-14T12:00:00Z'),
   });
@@ -434,7 +468,7 @@ describe('orderService.create', () => {
     vi.mocked(audit.record).mockResolvedValueOnce(
       err({ code: 'audit_write_failed', message: 'boom' })
     );
-    const service = createOrderService({ orders: repo, audit });
+    const service = createOrderService({ orders: repo, products: makeProductsRepo(), audit });
     const result = await service.create(superAdmin, createInput());
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('audit_write_failed');
@@ -628,7 +662,7 @@ describe('orderService.transition', () => {
     vi.mocked(audit.record).mockResolvedValueOnce(
       err({ code: 'audit_write_failed', message: 'boom' })
     );
-    const service = createOrderService({ orders: repo, audit });
+    const service = createOrderService({ orders: repo, products: makeProductsRepo(), audit });
     const result = await service.transition(superAdmin, ORDER_ID, { event: 'submit' });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('audit_write_failed');
@@ -658,17 +692,17 @@ describe('orderService.get / list', () => {
     if (!result.ok) expect(result.error.code).toBe('order/not_found');
   });
 
-  it('assessment_admin can read orders for their product only', async () => {
+  it('assessment_admin can read orders for their organization’s products only', async () => {
     const { service } = makeService([fixtureOrder()]);
     const owner: CallerContext = {
       kind: 'user',
       id: '88888888-8888-7888-8888-888888888888',
-      roles: [assignment('assessment_admin', { productId: PRODUCT_ID })],
+      roles: [assignment('assessment_admin', { organizationId: ORG_ID })],
     };
     expect((await service.get(owner, ORDER_ID)).ok).toBe(true);
     const other: CallerContext = {
       ...owner,
-      roles: [assignment('assessment_admin', { productId: OTHER_CLIENT_ID })],
+      roles: [assignment('assessment_admin', { organizationId: OTHER_ORG_ID })],
     };
     expect((await service.get(other, ORDER_ID)).ok).toBe(false);
   });
@@ -692,6 +726,32 @@ describe('orderService.get / list', () => {
 
     const wrongScope = await service.list(clientAdmin, { clientId: OTHER_CLIENT_ID });
     expect(wrongScope.ok).toBe(false);
+  });
+
+  it('lists orders for org-scoped assessment_admins by organizationId (M2)', async () => {
+    const { service } = makeService([
+      fixtureOrder(),
+      fixtureOrder({
+        id: '01890000-0000-7000-8000-000000000043',
+        productId: OTHER_CLIENT_ID, // a product of some other org
+      }),
+    ]);
+    const orgAdmin: CallerContext = {
+      kind: 'user',
+      id: '88888888-8888-7888-8888-888888888888',
+      roles: [assignment('assessment_admin', { organizationId: ORG_ID })],
+    };
+
+    const scoped = await service.list(orgAdmin, { organizationId: ORG_ID });
+    expect(scoped.ok).toBe(true);
+    if (scoped.ok) expect(scoped.value.items.map((o) => o.id)).toEqual([ORDER_ID]);
+
+    const unscoped = await service.list(orgAdmin, {});
+    expect(unscoped.ok).toBe(false);
+
+    const wrongOrg = await service.list(orgAdmin, { organizationId: OTHER_ORG_ID });
+    expect(wrongOrg.ok).toBe(false);
+    if (!wrongOrg.ok) expect(wrongOrg.error.code).toBe('order/forbidden');
   });
 });
 

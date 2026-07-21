@@ -1,4 +1,4 @@
-import { clientScopeIds, isSuperAdmin, productScopeIds, type RoleAssignment } from '@assessify/domain';
+import { clientScopeIds, isSuperAdmin, orgScopeIds, type RoleAssignment } from '@assessify/domain';
 import { describe, expect, it } from 'vitest';
 
 import { createCallerContextService } from './caller-context';
@@ -11,6 +11,7 @@ function fakeRepo(rows: RoleAssignment[]) {
 
 const clientAdmin: RoleAssignment = {
   role: 'client_admin',
+  organizationId: null,
   productId: null,
   clientId: '0197a7c0-0000-7000-8000-000000000001',
   permissions: {
@@ -32,7 +33,7 @@ describe('createCallerContextService', () => {
     expect(result.value.id).toBe('user_123');
     expect(result.value.roles).toEqual([clientAdmin]);
     expect(clientScopeIds(result.value)).toEqual([clientAdmin.clientId]);
-    expect(productScopeIds(result.value)).toEqual([]);
+    expect(orgScopeIds(result.value)).toEqual([]);
     expect(isSuperAdmin(result.value)).toBe(false);
   });
 

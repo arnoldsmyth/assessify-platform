@@ -42,7 +42,12 @@ export type ClientUserPermissions = z.infer<typeof clientUserPermissionsSchema>;
 /** One row of `role_assignments`, mapped to the domain. */
 export const roleAssignmentSchema = z.object({
   role: roleNameSchema,
-  /** Product scope — required for assessment_admin, null otherwise. */
+  /**
+   * Organization scope — required for assessment_admin (org-scoped since the
+   * M2 re-scope, owner decisions 2026-07-21), null otherwise.
+   */
+  organizationId: z.string().uuid().nullable().default(null),
+  /** Legacy product scope — kept for now; assessment_admin checks use the org. */
   productId: z.string().uuid().nullable().default(null),
   /** Client scope — required for client_admin / client_user, null otherwise. */
   clientId: z.string().uuid().nullable().default(null),
@@ -80,10 +85,14 @@ export function clientScopeIds(context: CallerContext): string[] {
   return [...new Set(ids)];
 }
 
-/** Product ids the caller is scoped to via assessment_admin rows. */
-export function productScopeIds(context: CallerContext): string[] {
+/**
+ * Organization ids the caller is scoped to via assessment_admin rows.
+ * "May manage this product" is resolved through the product's organization:
+ * load the product and check its organizationId against this list.
+ */
+export function orgScopeIds(context: CallerContext): string[] {
   const ids = context.roles
-    .filter((a) => a.role === 'assessment_admin' && a.productId !== null)
-    .map((a) => a.productId as string);
+    .filter((a) => a.role === 'assessment_admin' && a.organizationId !== null)
+    .map((a) => a.organizationId as string);
   return [...new Set(ids)];
 }
