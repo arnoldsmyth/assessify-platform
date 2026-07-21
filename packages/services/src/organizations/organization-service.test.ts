@@ -168,7 +168,10 @@ function makeProductsRepo(seed: Product[] = [fixtureProduct()]) {
       },
       findBySlug: vi.fn(),
       insert: vi.fn(),
-      list: vi.fn(),
+      list: async ({ limit, offset }: { limit: number; offset: number }) => {
+        const items = [...rows.values()].slice(offset, offset + limit);
+        return { items, total: rows.size };
+      },
     } as unknown as ProductRepository,
     rows,
   };
@@ -626,5 +629,69 @@ describe('organizationService.listContexts', () => {
     const result = await service.listContexts({ kind: 'system', id: 'system', roles: [] });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value).toEqual([]);
+  });
+});
+
+describe('organizationService.getManagedProduct', () => {
+  it('returns the product for its org admin and for super admins', async () => {
+    const { service } = makeService();
+    for (const caller of [orgAdmin, superAdmin]) {
+      const result = await service.getManagedProduct(caller, PRODUCT_ID);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.id).toBe(PRODUCT_ID);
+    }
+  });
+
+  it('denies admins of other organizations and client admins', async () => {
+    const { service } = makeService();
+    for (const caller of [otherOrgAdmin, clientAdmin]) {
+      const result = await service.getManagedProduct(caller, PRODUCT_ID);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('organization/forbidden');
+    }
+  });
+
+  it('reports unknown products as not found', async () => {
+    const { service } = makeService({ products: [] });
+    const result = await service.getManagedProduct(superAdmin, PRODUCT_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('organization/product_not_found');
+  });
+});
+
+describe('organizationService.listOrgProducts', () => {
+  const OTHER_PRODUCT_ID = '01890000-0000-7000-8000-000000000002';
+
+  it('lists only the organization’s products, name A→Z', async () => {
+    const { service } = makeService({
+      products: [
+        fixtureProduct({ id: PRODUCT_ID, name: 'Zeta' }),
+        fixtureProduct({ id: OTHER_PRODUCT_ID, name: 'Alpha' }),
+        fixtureProduct({
+          id: '01890000-0000-7000-8000-000000000003',
+          organizationId: OTHER_ORG_ID,
+          name: 'Elsewhere',
+        }),
+      ],
+    });
+    for (const caller of [orgAdmin, superAdmin]) {
+      const result = await service.listOrgProducts(caller, ORG_ID);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.map((p) => p.name)).toEqual(['Alpha', 'Zeta']);
+    }
+  });
+
+  it('denies admins of other organizations', async () => {
+    const { service } = makeService();
+    const result = await service.listOrgProducts(otherOrgAdmin, ORG_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('organization/forbidden');
+  });
+
+  it('reports unknown organizations as not found', async () => {
+    const { service } = makeService();
+    const result = await service.listOrgProducts(superAdmin, OTHER_ORG_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('organization/not_found');
   });
 });

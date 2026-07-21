@@ -34,6 +34,7 @@ export function formStateFromError(error: DomainError): ProductFormState {
 export interface ProductFormValues {
   slug: string;
   name: string;
+  defaultAccess: boolean;
   defaultLanguage: string;
   availableLanguages: string[];
   timezone: string;
@@ -49,6 +50,7 @@ export function toFormValues(product: Product): ProductFormValues {
   return {
     slug: product.slug,
     name: product.name,
+    defaultAccess: product.defaultAccess,
     defaultLanguage: product.defaultLanguage,
     availableLanguages: product.availableLanguages,
     timezone: product.timezone,
@@ -111,6 +113,11 @@ export function parseProductFormData(formData: FormData): unknown {
   const endpoint = text('scoringConfig.endpoint');
   if (endpoint) scoringConfig.endpoint = endpoint;
 
+  // Only the create form renders the organization picker (M4). The update
+  // schema is strict and org reassignment is a separate super_admin
+  // operation, so the key must be absent when the field is not in the form.
+  const organizationId = text('organizationId');
+
   const retailPriceRaw = text('retailPrice');
   const retailPrice =
     retailPriceRaw === undefined
@@ -120,8 +127,10 @@ export function parseProductFormData(formData: FormData): unknown {
         : retailPriceRaw; // let the schema report the type error
 
   return {
+    ...(formData.has('organizationId') ? { organizationId: organizationId ?? '' } : {}),
     slug: text('slug') ?? '',
     name: text('name') ?? '',
+    defaultAccess: formData.get('defaultAccess') === 'on',
     branding,
     defaultLanguage: text('defaultLanguage') ?? 'en',
     availableLanguages:

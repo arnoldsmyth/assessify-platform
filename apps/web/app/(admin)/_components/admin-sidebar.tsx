@@ -8,11 +8,15 @@ import { adminNavItems } from './nav-items';
 
 export function AdminSidebar({
   errorCount = 0,
+  hasOrgScope = false,
 }: {
   /** Open error-state orders (super admins only) — badge on "Error queue". */
   errorCount?: number;
+  /** super_admin or org admin — shows org-scoped nav items (M4). */
+  hasOrgScope?: boolean;
 }) {
   const pathname = usePathname();
+  const items = adminNavItems.filter((item) => !item.requiresOrgScope || hasOrgScope);
 
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-ink text-white">
@@ -23,7 +27,7 @@ export function AdminSidebar({
       </div>
       <nav aria-label="Admin" className="flex-1 overflow-y-auto px-3 py-2">
         <ul className="flex flex-col gap-0.5">
-          {adminNavItems.map((item) => {
+          {items.map((item) => {
             const active =
               item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href);
             return (

@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Archive, ArrowLeft, FileJson, Languages } from 'lucide-react';
+import { Archive, ArrowLeft, FileJson, KeyRound, Languages, Tags } from 'lucide-react';
 
-import { Button } from '@assessify/ui';
-import { getProductService } from '@assessify/services';
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@assessify/ui';
+import { getOrganizationService, getProductService } from '@assessify/services';
 
-import { archiveProductAction, updateProductAction } from '../actions';
+import { archiveProductAction, reassignProductOrganizationAction, updateProductAction } from '../actions';
+import { OrgAssignment } from '../_components/org-assignment';
 import { ProductForm } from '../_components/product-form';
 import { toFormValues } from '../_lib/form';
 
@@ -24,8 +25,17 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
   }
   const product = result.value;
 
+  // This page is super_admin-gated (productService.get above), so the full
+  // org list applies — for the owning-org display and the move control.
+  const orgsResult = await getOrganizationService().list(caller);
+  const organizations = orgsResult.ok ? orgsResult.value : [];
+  const owningOrg = organizations.find(
+    (organization) => organization.id === product.organizationId
+  );
+
   const updateAction = updateProductAction.bind(null, product.id);
   const archiveAction = archiveProductAction.bind(null, product.id);
+  const reassignAction = reassignProductOrganizationAction.bind(null, product.id);
 
   return (
     <div className="flex flex-col gap-6">
@@ -44,7 +54,7 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
             {product.status === 'retired' ? ' · retired' : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button asChild variant="outline">
             <Link href={`/admin/products/${product.id}/questionnaires`}>
               <FileJson size={16} strokeWidth={1.75} aria-hidden="true" />
@@ -57,6 +67,18 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
               Translations
             </Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link href={`/admin/products/${product.id}/pricing`}>
+              <Tags size={16} strokeWidth={1.75} aria-hidden="true" />
+              Pricing
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/admin/products/${product.id}/access`}>
+              <KeyRound size={16} strokeWidth={1.75} aria-hidden="true" />
+              Client access
+            </Link>
+          </Button>
           {product.status === 'active' ? (
             <form action={archiveAction}>
               <Button type="submit" variant="outline">
@@ -67,6 +89,40 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
           ) : null}
         </div>
       </div>
+
+      <Card className="max-w-5xl">
+        <CardHeader>
+          <CardTitle className="text-base">Organization</CardTitle>
+          <CardDescription>
+            The product owner company. Moving a product is an explicit platform operation, kept
+            out of the ordinary edit form.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4">
+          <p className="text-sm text-body">
+            Owned by{' '}
+            {owningOrg ? (
+              <Link
+                href={`/admin/organizations/${owningOrg.id}`}
+                className="font-medium text-primary hover:underline"
+              >
+                {owningOrg.name}
+              </Link>
+            ) : (
+              <span className="font-mono text-xs">{product.organizationId}</span>
+            )}
+          </p>
+          <OrgAssignment
+            productName={product.name}
+            currentOrgId={product.organizationId}
+            organizations={organizations.map((organization) => ({
+              id: organization.id,
+              name: organization.name,
+            }))}
+            action={reassignAction}
+          />
+        </CardContent>
+      </Card>
 
       <ProductForm
         action={updateAction}
