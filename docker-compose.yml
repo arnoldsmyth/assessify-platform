@@ -1,0 +1,94 @@
+# Local preview stack — everything the platform needs, self-contained.
+# Credentials below are throwaway local-only defaults, not secrets.
+#
+#   docker compose up --build
+#   docker compose exec web pnpm --filter @assessify/web exec tsx scripts/bootstrap-admin.ts you@example.com "a strong password" "Your Name"
+#
+# Then open http://localhost:3000/login.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: assessify
+      POSTGRES_USER: assessify
+      POSTGRES_PASSWORD: assessify
+    ports:
+      - "5432:5432"
+    volumes:
+      - assessify-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assessify -d assessify"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  pdf-service:
+    build:
+      context: ./apps/pdf-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: build
+    command: ["pnpm", "--filter", "@assessify/db", "migrate"]
+    environment:
+      DATABASE_URL: postgres://assessify:assessify@postgres:5432/assessify
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://assessify:assessify@postgres:5432/assessify
+      BETTER_AUTH_SECRET: local-dev-secret-please-change-32chars
+      BETTER_AUTH_URL: http://localhost:3000
+      RESPONDENT_SESSION_SECRET: local-dev-secret-please-change-32chars
+      REDIS_URL: redis://redis:6379
+      ADMIN_HOSTNAMES: localhost,127.0.0.1,web
+      PDF_SERVICE_URL: http://pdf-service:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      DATABASE_URL: postgres://assessify:assessify@postgres:5432/assessify
+      REDIS_URL: redis://redis:6379
+      PDF_SERVICE_URL: http://pdf-service:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  assessify-postgres:

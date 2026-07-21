@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/*.tsbuildinfo
+**/coverage
+.git
+.claude/worktrees
+apps/pdf-service/.venv
+apps/pdf-service/__pycache__

@@ -9,7 +9,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "generate": "drizzle-kit generate",
-    "generate:custom": "drizzle-kit generate --custom"
+    "generate:custom": "drizzle-kit generate --custom",
+    "migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "drizzle-orm": "^0.44.2",

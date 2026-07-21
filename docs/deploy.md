@@ -1,4 +1,38 @@
-# Deploying Assessify (A7 — DO App Platform)
+# Deploying Assessify
+
+## Local Docker preview
+
+`docker-compose.yml` runs the whole stack — Postgres, Redis, `pdf-service`,
+`web`, `worker` — with local-only throwaway credentials, migrations applied
+automatically before `web`/`worker` start:
+
+```bash
+docker compose up --build
+# once healthy, create the first admin (no self-serve signup by design):
+docker compose exec web pnpm --filter @assessify/web exec tsx scripts/bootstrap-admin.ts \
+  you@example.com "a strong password" "Your Name"
+```
+
+Open `http://localhost:3000/login`. This is the fastest way to see the admin
+UI working end to end; it is not a production deployment target.
+
+## Hosting (Coolify + Hetzner)
+
+Owner decision 2026-07-20: hosting is **Coolify** (deploys from this GitHub
+repo) with **Hetzner Object Storage** (S3-compatible) for assets, not
+DigitalOcean. `apps/web/Dockerfile`, `apps/worker/Dockerfile`, and
+`apps/pdf-service/Dockerfile` are what Coolify builds from — the same images
+`docker-compose.yml` uses above. Full Coolify service setup (env vars per
+service, Postgres, Redis, custom domains) is tracked as `asy-2m9` — not yet
+written up.
+
+## Superseded: DigitalOcean App Platform (historical)
+
+The rest of this document describes the original DO App Platform plan
+(`.do/app.yaml`, `.do/app.staging.yaml`). Both spec files are marked
+superseded and kept for reference only — hosting moved to Coolify. Skip to
+**Local Docker preview** above unless you're specifically resurrecting the
+DO path.
 
 Topology per `docs/spec/03-architecture.md`: one DO App per environment with
 four components — `web` (Next.js), `worker` (BullMQ), `pdf-service`
