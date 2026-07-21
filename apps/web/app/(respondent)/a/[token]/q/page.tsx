@@ -3,7 +3,9 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import { RESPONDENT_SESSION_COOKIE } from '@assessify/domain';
-import { getQuestionnaireSessionService, getRespondentAccessService } from '@assessify/services';
+import { getRespondentAccessService } from '@assessify/services';
+
+import { getWebQuestionnaireSessionService } from '@/lib/questionnaire-session';
 
 import { AccessShell } from '../../../access/_components/access-shell';
 import { QuestionnaireRenderer } from './_components/questionnaire-renderer';
@@ -38,7 +40,7 @@ export default async function QuestionnairePage({
     redirect(`/a/${token}`);
   }
 
-  const state = await getQuestionnaireSessionService().loadState(sessionCookie);
+  const state = await getWebQuestionnaireSessionService().loadState(sessionCookie);
   if (!state.ok) {
     if (state.error.code.startsWith('respondent_access/')) redirect(`/a/${token}`);
     return (

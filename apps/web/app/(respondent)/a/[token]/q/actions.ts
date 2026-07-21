@@ -3,12 +3,10 @@
 import { cookies } from 'next/headers';
 
 import { RESPONDENT_SESSION_COOKIE, type Result } from '@assessify/domain';
-import {
-  getQuestionnaireSessionService,
-  type SaveAnswersOutcome,
-  type SubmitOutcome,
-} from '@assessify/services';
+import type { SaveAnswersOutcome, SubmitOutcome } from '@assessify/services';
 import type { ResponseProgress } from '@assessify/domain';
+
+import { getWebQuestionnaireSessionService } from '@/lib/questionnaire-session';
 
 /**
  * Questionnaire renderer server actions (C2 — spec 07). Thin controllers:
@@ -25,15 +23,15 @@ async function sessionCookie(): Promise<string | undefined> {
 
 /** Debounced autosave flush: { questionKey → answer record }. */
 export async function saveAnswersAction(patch: unknown): Promise<Result<SaveAnswersOutcome>> {
-  return getQuestionnaireSessionService().saveAnswers(await sessionCookie(), patch);
+  return getWebQuestionnaireSessionService().saveAnswers(await sessionCookie(), patch);
 }
 
 /** Record the section the respondent navigated to (resume position). */
 export async function savePositionAction(sectionKey: string): Promise<Result<ResponseProgress>> {
-  return getQuestionnaireSessionService().savePosition(await sessionCookie(), sectionKey);
+  return getWebQuestionnaireSessionService().savePosition(await sessionCookie(), sectionKey);
 }
 
 /** Final submit: server-side completeness validation + immutability flip. */
 export async function submitAction(): Promise<Result<SubmitOutcome>> {
-  return getQuestionnaireSessionService().submit(await sessionCookie());
+  return getWebQuestionnaireSessionService().submit(await sessionCookie());
 }
