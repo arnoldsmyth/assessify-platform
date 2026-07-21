@@ -16,7 +16,7 @@ import type {
   PaymentProvider,
   RespondentSessionStatus,
 } from '@assessify/domain';
-import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 
 /**
  * Data access for `orders` + `order_items` (spec 04). Pure persistence — no
@@ -84,6 +84,18 @@ export interface OrderPage {
   total: number;
 }
 
+/**
+ * Multi-status listing for the admin error queue (D7 — spec 06 "error states
+ * alert an admin and offer retry"). Ordered by `updated_at` DESC: a status
+ * transition is the write that stamps `updated_at`, so the most recently
+ * failed orders surface first.
+ */
+export interface OrderStatusListQuery {
+  statuses: readonly OrderStatus[];
+  limit: number;
+  offset: number;
+}
+
 export interface OrderRepository {
   /**
    * Insert order + items + respondent sessions atomically; the DB sequence
@@ -107,6 +119,12 @@ export interface OrderRepository {
    */
   setPaymentProvider(id: string, provider: PaymentProvider | null): Promise<void>;
   list(query: OrderListQuery): Promise<OrderPage>;
+  /** Orders in any of the given statuses, most recently updated first (error queue). */
+  listByStatuses(query: OrderStatusListQuery): Promise<OrderPage>;
+  /** Per-status order counts for the given statuses (absent = zero rows). */
+  countByStatuses(
+    statuses: readonly OrderStatus[]
+  ): Promise<Partial<Record<OrderStatus, number>>>;
 }
 
 type OrderRow = typeof orders.$inferSelect;
@@ -379,6 +397,34 @@ export function createOrderRepository(db: Database): OrderRepository {
         db.select({ count: sql<number>`count(*)::int` }).from(orders).where(where),
       ]);
       return { items: rows.map(toOrderEntity), total: countRows[0]?.count ?? 0 };
+    },
+
+    async listByStatuses(query) {
+      if (query.statuses.length === 0) return { items: [], total: 0 };
+      const where = inArray(orders.status, [...query.statuses]);
+      const [rows, countRows] = await Promise.all([
+        db
+          .select()
+          .from(orders)
+          .where(where)
+          .orderBy(desc(orders.updatedAt), desc(orders.id))
+          .limit(query.limit)
+          .offset(query.offset),
+        db.select({ count: sql<number>`count(*)::int` }).from(orders).where(where),
+      ]);
+      return { items: rows.map(toOrderEntity), total: countRows[0]?.count ?? 0 };
+    },
+
+    async countByStatuses(statuses) {
+      if (statuses.length === 0) return {};
+      const rows = await db
+        .select({ status: orders.status, count: sql<number>`count(*)::int` })
+        .from(orders)
+        .where(inArray(orders.status, [...statuses]))
+        .groupBy(orders.status);
+      const counts: Partial<Record<OrderStatus, number>> = {};
+      for (const row of rows) counts[row.status as OrderStatus] = row.count;
+      return counts;
     },
   };
 }

@@ -30,6 +30,7 @@ export {
   type OrderListQuery,
   type OrderPage,
   type OrderRepository,
+  type OrderStatusListQuery,
   type OrderStatusPatch,
 } from './postgres/orders';
 export {
