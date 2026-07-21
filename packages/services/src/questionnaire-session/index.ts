@@ -5,6 +5,8 @@ export {
   type QuestionnaireSessionServiceDeps,
   type RendererState,
   type SaveAnswersOutcome,
+  type SetLanguageOutcome,
   type SubmitOutcome,
+  type TranslationResolver,
 } from './questionnaire-session-service';
 export { alwaysVisible, showIfVisibility, type VisibilityEvaluator } from './visibility';

@@ -3,6 +3,7 @@ import {
   ok,
   type AnswerRecord,
   type AnswersPatch,
+  type Product,
   type QuestionnaireResponse,
   type RespondentAccessSession,
   type ResponseProgress,
@@ -237,11 +238,17 @@ class FakeResponses implements ResponseRepository {
   }
   async updateProgress(
     sessionId: string,
-    progress: ResponseProgress
+    progress: ResponseProgress,
+    options: { language?: string } = {}
   ): Promise<QuestionnaireResponse | null> {
     const row = this.rows.get(sessionId);
     if (!row || row.status !== 'draft') return null;
-    const next = { ...row, progress, updatedAt: new Date() };
+    const next = {
+      ...row,
+      progress,
+      ...(options.language === undefined ? {} : { language: options.language }),
+      updatedAt: new Date(),
+    };
     this.rows.set(sessionId, next);
     return next;
   }
@@ -260,6 +267,55 @@ class FakeResponses implements ResponseRepository {
     this.rows.set(sessionId, next);
     return next;
   }
+}
+
+/** Minimal product carrying the language metadata the service reads. */
+function fakeProduct(overrides: Partial<Product> = {}): Product {
+  return {
+    id: PRODUCT_ID,
+    slug: 'test-product',
+    name: 'Test Product',
+    status: 'active',
+    defaultLanguage: 'en',
+    availableLanguages: ['en', 'fr'],
+    ...overrides,
+  } as Product;
+}
+
+interface FakeProducts {
+  findById(id: string): Promise<Product | null>;
+}
+
+function fakeProducts(product: Product | null = fakeProduct()): FakeProducts {
+  return {
+    findById: async (id) => (product && product.id === id ? product : null),
+  };
+}
+
+/**
+ * B4 port fake: `t:<language>:<key>` per key, mimicking the real resolve
+ * contract (requested-language value with default fallback is the service's
+ * concern — here every key "translates"). Records calls for assertions.
+ */
+function fakeTranslations(strings?: Record<string, string>) {
+  const calls: { productId: string; language: string; keys: string[] | undefined }[] = [];
+  return {
+    calls,
+    resolve: vi.fn(async (productId: string, language: string, keys?: string[]) => {
+      calls.push({ productId, language, keys });
+      const resolved =
+        strings ??
+        Object.fromEntries((keys ?? []).map((key) => [key, `t:${language}:${key}`]));
+      return ok({
+        productId,
+        language,
+        defaultLanguage: 'en',
+        strings: resolved,
+        fallbackKeys: [],
+        missingKeys: [],
+      });
+    }),
+  };
 }
 
 function fakeAudit(): AuditService & { record: ReturnType<typeof vi.fn> } {
@@ -289,25 +345,30 @@ function build(overrides: {
   sessions?: FakeSessions;
   responses?: FakeResponses;
   versions?: QuestionnaireVersionRepository;
+  products?: FakeProducts;
+  translations?: ReturnType<typeof fakeTranslations>;
   audit?: ReturnType<typeof fakeAudit>;
   visibility?: VisibilityEvaluator;
   scoring?: ScoringDispatcher;
 } = {}) {
   const sessions = overrides.sessions ?? new FakeSessions();
   const responses = overrides.responses ?? new FakeResponses();
+  const translations = overrides.translations ?? fakeTranslations();
   const audit = overrides.audit ?? fakeAudit();
   const service = createQuestionnaireSessionService({
     access,
     sessions,
     versions: overrides.versions ?? fakeVersions(),
     responses,
+    products: overrides.products ?? fakeProducts(),
+    translations,
     audit,
     visibility: overrides.visibility,
     scoring: overrides.scoring,
     now: () => NOW,
     newId: () => '01890000-0000-7000-8000-00000000ffff',
   });
-  return { service, sessions, responses, audit };
+  return { service, sessions, responses, translations, audit };
 }
 
 function record(partial: Partial<AnswerRecord> & Pick<AnswerRecord, 'type' | 'value'>): AnswerRecord {
@@ -403,6 +464,189 @@ describe('loadState', () => {
     if (!result.ok) return;
     expect(result.value.status).toBe('submitted');
     expect(result.value.completedAt).toBe(NOW.toISOString());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadState — server-side translation resolution (asy-sex)
+// ---------------------------------------------------------------------------
+
+describe('loadState translation resolution', () => {
+  it("resolves the definition's keys for the session language and returns strings + language metadata", async () => {
+    const translations = fakeTranslations();
+    const { service } = build({
+      translations,
+      sessions: new FakeSessions(fakeSession({ language: 'fr' })),
+    });
+    const result = await service.loadState(TOKEN);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.language).toBe('fr');
+    expect(result.value.availableLanguages).toEqual(['en', 'fr']);
+    expect(result.value.defaultLanguage).toBe('en');
+
+    // Resolved via the B4 port with the version's FULL collected key set.
+    expect(translations.calls).toHaveLength(1);
+    const call = translations.calls[0];
+    expect(call?.productId).toBe(PRODUCT_ID);
+    expect(call?.language).toBe('fr');
+    expect(call?.keys).toContain('test.title');
+    expect(call?.keys).toContain('t.l'); // question textKey
+    expect(call?.keys).toContain('t.a'); // option labelKey
+    expect(call?.keys).toContain('t.wb'); // content bodyKey
+    expect(result.value.strings['test.title']).toBe('t:fr:test.title');
+  });
+
+  it('falls back to the product default language when the session has none', async () => {
+    const translations = fakeTranslations();
+    const { service } = build({
+      translations,
+      sessions: new FakeSessions(fakeSession({ language: null })),
+    });
+    const result = await service.loadState(TOKEN);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.language).toBe('en');
+    expect(translations.calls[0]?.language).toBe('en');
+  });
+
+  it('falls back to the default language when the stored language is no longer offered', async () => {
+    const translations = fakeTranslations();
+    const { service } = build({
+      translations,
+      sessions: new FakeSessions(fakeSession({ language: 'de' })), // not in ['en','fr']
+    });
+    const result = await service.loadState(TOKEN);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.language).toBe('en');
+  });
+
+  it('prefers the language stored on the response row over the session (setLanguage persistence)', async () => {
+    const responses = new FakeResponses();
+    const translations = fakeTranslations();
+    const { service } = build({
+      responses,
+      translations,
+      sessions: new FakeSessions(fakeSession({ language: 'en' })),
+    });
+    await service.loadState(TOKEN);
+    await service.setLanguage(TOKEN, 'fr');
+    const result = await service.loadState(TOKEN);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.language).toBe('fr');
+    expect(translations.calls.at(-1)?.language).toBe('fr');
+  });
+
+  it('returns empty strings (renderer humanize fallback) when resolution fails, without failing the load', async () => {
+    const translations = {
+      calls: [],
+      resolve: vi.fn(async () =>
+        err({ code: 'translation/product_not_found', message: 'nope' })
+      ),
+    } as unknown as ReturnType<typeof fakeTranslations>;
+    const { service } = build({ translations });
+    const result = await service.loadState(TOKEN);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.strings).toEqual({});
+    expect(result.value.language).toBe('en');
+  });
+
+  it('survives a missing product row (fail-soft language metadata)', async () => {
+    const { service } = build({
+      products: fakeProducts(null),
+      sessions: new FakeSessions(fakeSession({ language: 'fr' })),
+    });
+    const result = await service.loadState(TOKEN);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.language).toBe('en');
+    expect(result.value.availableLanguages).toEqual(['en']);
+    expect(result.value.defaultLanguage).toBe('en');
+  });
+
+  it('passes missing keys through as absent strings (humanize fallback path)', async () => {
+    const translations = fakeTranslations({ 'test.title': 'Titre' }); // everything else missing
+    const { service } = build({ translations });
+    const result = await service.loadState(TOKEN);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.strings).toEqual({ 'test.title': 'Titre' });
+    expect(result.value.strings['t.l']).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setLanguage (C6)
+// ---------------------------------------------------------------------------
+
+describe('setLanguage', () => {
+  it('persists an available language on the response row', async () => {
+    const responses = new FakeResponses();
+    const { service } = build({ responses });
+    await service.loadState(TOKEN);
+    const result = await service.setLanguage(TOKEN, 'fr');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.language).toBe('fr');
+    expect(responses.rows.get(SESSION_ID)?.language).toBe('fr');
+  });
+
+  it('never touches answers when switching (lossless, spec 07)', async () => {
+    const responses = new FakeResponses();
+    const { service } = build({ responses });
+    await service.loadState(TOKEN);
+    await service.saveAnswers(TOKEN, completeAnswers());
+    const before = responses.rows.get(SESSION_ID)?.answers;
+    const result = await service.setLanguage(TOKEN, 'fr');
+    expect(result.ok).toBe(true);
+    expect(responses.rows.get(SESSION_ID)?.answers).toEqual(before);
+  });
+
+  it('rejects a language the product does not offer', async () => {
+    const responses = new FakeResponses();
+    const { service } = build({ responses });
+    await service.loadState(TOKEN);
+    const result = await service.setLanguage(TOKEN, 'de');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('questionnaire/language_unavailable');
+    expect(result.error.detail).toEqual({
+      language: 'de',
+      availableLanguages: ['en', 'fr'],
+    });
+    expect(responses.rows.get(SESSION_ID)?.language).toBe('en'); // unchanged
+  });
+
+  it('rejects a malformed language tag before touching anything', async () => {
+    const { service } = build();
+    await service.loadState(TOKEN);
+    const result = await service.setLanguage(TOKEN, 'NOT A TAG!!');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('questionnaire/language_invalid');
+  });
+
+  it('refuses switching once submitted', async () => {
+    const { service } = build();
+    await service.loadState(TOKEN);
+    await service.saveAnswers(TOKEN, completeAnswers());
+    await service.submit(TOKEN);
+    const result = await service.setLanguage(TOKEN, 'fr');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('questionnaire/already_submitted');
+  });
+
+  it('passes access errors through untouched', async () => {
+    const { service } = build();
+    const result = await service.setLanguage('bogus', 'fr');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('respondent_access/session_invalid');
   });
 });
 

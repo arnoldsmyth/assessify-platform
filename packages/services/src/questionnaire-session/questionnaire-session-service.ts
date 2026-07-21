@@ -1,6 +1,7 @@
 import {
   answersPatchSchema,
   err,
+  languageTagSchema,
   ok,
   questionKeySchema,
   uuidv7,
@@ -21,6 +22,7 @@ import {
   type Section,
 } from '@assessify/questionnaire-schema';
 import type {
+  ProductRepository,
   QuestionnaireVersionRepository,
   RespondentSessionRepository,
   ResponseRepository,
@@ -28,6 +30,8 @@ import type {
 
 import type { AuditService } from '../audit';
 import { noopScoringDispatcher, type ScoringDispatcher } from '../scoring/dispatcher';
+import { collectTranslationKeys } from '../translations/translation-keys';
+import type { TranslationService } from '../translations/translation-service';
 import { saveIssues, submitIssues } from './answer-validation';
 import { showIfVisibility, type VisibilityEvaluator } from './visibility';
 
@@ -61,8 +65,23 @@ export interface RendererState {
   status: ResponseStatus;
   /** Section index to resume at (0 when there is no saved position). */
   resumeSectionIndex: number;
-  /** Respondent's display language, if set on the session. */
-  language: string | null;
+  /**
+   * Active display language (asy-sex): the stored choice when the product
+   * still offers it, else the product's default language. Never null — the
+   * renderer always has a concrete language to resolve against.
+   */
+  language: string;
+  /** Languages the respondent may switch to (`products.available_languages`). */
+  availableLanguages: string[];
+  /** The product's default language (the translation fallback source). */
+  defaultLanguage: string;
+  /**
+   * Server-resolved translation copy for `language` (translation key →
+   * string, default-language fallback already applied — B4 `resolve`). Keys
+   * with no copy in any language are absent; the renderer falls back to the
+   * humanized key form for those.
+   */
+  strings: Record<string, string>;
   /** Non-null once submitted (ISO-8601). */
   completedAt: string | null;
 }
@@ -99,7 +118,24 @@ export interface QuestionnaireSessionService {
    * and the session completed, and audit the submission.
    */
   submit(sessionToken: unknown): Promise<Result<SubmitOutcome>>;
+  /**
+   * C6: switch the respondent's display language mid-flight. Rejects
+   * languages the product does not offer; persists the choice on the draft
+   * response row (the renderer's single source of truth), after which
+   * `loadState` resolves translations in the new language. Answers are
+   * language-independent option/question keys and are NEVER touched by a
+   * switch (spec 07 "switching mid-flight is lossless").
+   */
+  setLanguage(sessionToken: unknown, language: unknown): Promise<Result<SetLanguageOutcome>>;
 }
+
+export interface SetLanguageOutcome {
+  language: string;
+}
+
+/** Narrow B4 port (asy-sex): exactly the resolution half of the translation
+ * service — the session service never imports its admin surface. */
+export type TranslationResolver = Pick<TranslationService, 'resolve'>;
 
 export interface QuestionnaireSessionServiceDeps {
   /** C1 seam: validates the signed `resp_session` payload. */
@@ -109,6 +145,10 @@ export interface QuestionnaireSessionServiceDeps {
   sessions: RespondentSessionRepository;
   versions: QuestionnaireVersionRepository;
   responses: ResponseRepository;
+  /** Language metadata source (available/default languages per product). */
+  products: Pick<ProductRepository, 'findById'>;
+  /** B4 seam (asy-sex): server-side translation resolution for the renderer. */
+  translations: TranslationResolver;
   audit: AuditService;
   /** C5 seam: `showIf` evaluation. Defaults to the real branching evaluator. */
   visibility?: VisibilityEvaluator;
@@ -167,6 +207,21 @@ function sectionInvalid(): DomainError {
   return {
     code: 'questionnaire/section_invalid',
     message: 'That section does not exist in this questionnaire.',
+  };
+}
+
+function languageInvalid(): DomainError {
+  return {
+    code: 'questionnaire/language_invalid',
+    message: 'That language code is not valid.',
+  };
+}
+
+function languageUnavailable(language: string, availableLanguages: string[]): DomainError {
+  return {
+    code: 'questionnaire/language_unavailable',
+    message: 'That language is not available for this assessment.',
+    detail: { language, availableLanguages },
   };
 }
 
@@ -236,6 +291,18 @@ function computeProgress(
   };
 }
 
+/**
+ * Active display language: the stored choice while the product still offers
+ * it, else the product's default. Pure so both loadState and tests share it.
+ */
+function activeLanguage(
+  stored: string | null | undefined,
+  availableLanguages: string[],
+  defaultLanguage: string
+): string {
+  return stored && availableLanguages.includes(stored) ? stored : defaultLanguage;
+}
+
 function sameProgress(a: ResponseProgress, b: ResponseProgress): boolean {
   return (
     a.currentSectionKey === b.currentSectionKey &&
@@ -251,7 +318,7 @@ function sameProgress(a: ResponseProgress, b: ResponseProgress): boolean {
 export function createQuestionnaireSessionService(
   deps: QuestionnaireSessionServiceDeps
 ): QuestionnaireSessionService {
-  const { access, sessions, versions, responses, audit } = deps;
+  const { access, sessions, versions, responses, products, translations, audit } = deps;
   const visibility = deps.visibility ?? showIfVisibility;
   const scoring = deps.scoring ?? noopScoringDispatcher;
   const now = deps.now ?? (() => new Date());
@@ -334,6 +401,27 @@ export function createQuestionnaireSessionService(
         }
       }
 
+      // Localisation (asy-sex — spec 07): the definition carries translation
+      // KEYS; resolve the copy server-side for the active language. The
+      // respondent's choice lives on the response row (seeded from the
+      // session's language at creation, updated by setLanguage/C6). Both
+      // product lookup and resolution fail SOFT: a broken translation setup
+      // must never block answering — the renderer humanizes unresolved keys.
+      const product = await products.findById(version.productId);
+      const defaultLanguage = product?.defaultLanguage ?? 'en';
+      const availableLanguages = product?.availableLanguages ?? [defaultLanguage];
+      const language = activeLanguage(
+        response.language ?? session.language,
+        availableLanguages,
+        defaultLanguage
+      );
+      const resolved = await translations.resolve(
+        version.productId,
+        language,
+        collectTranslationKeys(definition.value)
+      );
+      const strings = resolved.ok ? resolved.value.strings : {};
+
       const sectionIndex = definition.value.sections.findIndex(
         (section) => section.key === response.progress.currentSectionKey
       );
@@ -343,7 +431,10 @@ export function createQuestionnaireSessionService(
         progress: response.progress,
         status: response.status,
         resumeSectionIndex: sectionIndex >= 0 ? sectionIndex : 0,
-        language: response.language,
+        language,
+        availableLanguages,
+        defaultLanguage,
+        strings,
         completedAt: response.completedAt ? response.completedAt.toISOString() : null,
       });
     },
@@ -403,6 +494,39 @@ export function createQuestionnaireSessionService(
       const updated = await responses.updateProgress(response.sessionId, progress);
       if (!updated) return err(alreadySubmitted());
       return ok(updated.progress);
+    },
+
+    async setLanguage(sessionToken, language) {
+      const parsed = languageTagSchema.safeParse(language);
+      if (!parsed.success) return err(languageInvalid());
+
+      const draft = await loadDraft(sessionToken);
+      if (!draft.ok) return draft;
+      const { response, definition } = draft.value;
+
+      // Spec 07 "Language switching": the switcher lists (and the service
+      // only accepts) the product's available languages.
+      const product = await products.findById(response.productId);
+      const availableLanguages = product?.availableLanguages ?? [];
+      if (!availableLanguages.includes(parsed.data)) {
+        return err(languageUnavailable(parsed.data, availableLanguages));
+      }
+
+      // Persist on the response row ONLY — the renderer's single source of
+      // truth for the active language. Progress is recomputed as on every
+      // other write path; answers are language-independent keys and are
+      // never touched (lossless switching, spec 07).
+      const progress = computeProgress(
+        definition,
+        response.answers,
+        visibility,
+        response.progress.currentSectionKey
+      );
+      const updated = await responses.updateProgress(response.sessionId, progress, {
+        language: parsed.data,
+      });
+      if (!updated) return err(alreadySubmitted());
+      return ok({ language: updated.language ?? parsed.data });
     },
 
     async submit(sessionToken) {

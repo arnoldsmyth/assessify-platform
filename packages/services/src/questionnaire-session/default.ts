@@ -3,12 +3,14 @@ import {
   createQuestionnaireVersionRepository,
   createRespondentSessionRepository,
   createResponseRepository,
+  DrizzleProductRepository,
   getDbHandle,
 } from '@assessify/repositories';
 
 import { createAuditService } from '../audit';
 import { getRespondentAccessService } from '../respondent-access';
 import type { ScoringDispatcher } from '../scoring/dispatcher';
+import { getTranslationService } from '../translations/default';
 import {
   createQuestionnaireSessionService,
   type QuestionnaireSessionService,
@@ -49,6 +51,10 @@ export function getQuestionnaireSessionService(
       sessions: createRespondentSessionRepository(connectionString),
       versions: createQuestionnaireVersionRepository(db),
       responses: createResponseRepository(connectionString),
+      products: new DrizzleProductRepository(db),
+      // B4 seam (asy-sex): the shared translation service resolves the
+      // renderer's copy with default-language fallback.
+      translations: getTranslationService(),
       audit: createAuditService({ auditLogRepository: createAuditLogRepository(db) }),
       visibility: showIfVisibility,
       ...(composition.scoring ? { scoring: composition.scoring } : {}),
