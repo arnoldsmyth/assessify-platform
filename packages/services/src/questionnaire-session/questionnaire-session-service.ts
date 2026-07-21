@@ -27,6 +27,7 @@ import type {
 } from '@assessify/repositories';
 
 import type { AuditService } from '../audit';
+import { noopScoringDispatcher, type ScoringDispatcher } from '../scoring/dispatcher';
 import { saveIssues, submitIssues } from './answer-validation';
 import { alwaysVisible, type VisibilityEvaluator } from './visibility';
 
@@ -111,6 +112,13 @@ export interface QuestionnaireSessionServiceDeps {
   audit: AuditService;
   /** C5 seam: `showIf` evaluation. Defaults to everything-visible. */
   visibility?: VisibilityEvaluator;
+  /**
+   * E1 seam: submit → scoring dispatch (spec 08 "session completed →
+   * scoringService.dispatch"). Defaults to a no-op where the composition
+   * root has no scoring wiring; dispatch failures never fail the submit —
+   * the scoring service audits them and admin retry/re-score catches up.
+   */
+  scoring?: ScoringDispatcher;
   now?: () => Date;
   newId?: () => string;
 }
@@ -245,6 +253,7 @@ export function createQuestionnaireSessionService(
 ): QuestionnaireSessionService {
   const { access, sessions, versions, responses, audit } = deps;
   const visibility = deps.visibility ?? alwaysVisible;
+  const scoring = deps.scoring ?? noopScoringDispatcher;
   const now = deps.now ?? (() => new Date());
   const newId = deps.newId ?? uuidv7;
 
@@ -453,6 +462,12 @@ export function createQuestionnaireSessionService(
         }
       );
       if (!audited.ok) return err(audited.error);
+
+      // E1 hook (spec 08): the completed session triggers scoring dispatch.
+      // A failed dispatch never fails the submit — the answers are safely
+      // immutable, the scoring service audits its own failures, and admin
+      // retry/re-score picks the session up from the error queue.
+      await scoring.dispatch(response.sessionId);
 
       return ok({ completedAt: at.toISOString(), progress: submitted.progress });
     },

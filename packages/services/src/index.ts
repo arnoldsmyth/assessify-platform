@@ -9,5 +9,6 @@ export * from './products';
 export * from './questionnaire-session';
 export * from './questionnaires';
 export * from './respondent-access';
+export * from './scoring';
 export * from './translations';
 export * from './tenants';

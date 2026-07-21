@@ -15,7 +15,9 @@
     "./mailer/sendgrid-webhook": "./src/mailer/providers/sendgrid-webhook.ts",
     "./payment/stripe": "./src/payment/providers/stripe.ts",
     "./payment/offline": "./src/payment/providers/offline.ts",
-    "./payment/memory": "./src/payment/providers/memory.ts"
+    "./payment/memory": "./src/payment/providers/memory.ts",
+    "./scoring/internal-sync": "./src/scoring/providers/internal-sync.ts",
+    "./scoring/memory": "./src/scoring/providers/memory.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

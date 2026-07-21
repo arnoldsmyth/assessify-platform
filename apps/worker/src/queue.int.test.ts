@@ -32,6 +32,7 @@ describe.runIf(connectionUrl !== undefined)('queue round trip (integration)', ()
     registry = createProcessorRegistry({
       health: { getHealth },
       notifications: { service: undefined },
+      scoring: { service: undefined },
     });
     worker = new Worker(queueName, (job) => dispatchJob(registry, job), { connection });
   });

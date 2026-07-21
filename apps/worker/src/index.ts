@@ -18,7 +18,7 @@
  */
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { getHealth, getNotificationService } from '@assessify/services';
+import { getHealth, getNotificationService, getScoringService } from '@assessify/services';
 import type { Mailer } from '@assessify/adapters';
 import {
   ASSESSIFY_QUEUE_NAME,
@@ -27,6 +27,7 @@ import {
 } from '@assessify/adapters/queue/bullmq';
 import { createConsoleMailer } from '@assessify/adapters/mailer/console';
 import { createSendGridMailer } from '@assessify/adapters/mailer/sendgrid';
+import { createInternalSyncScoringAdapter } from '@assessify/adapters/scoring/internal-sync';
 import { loadWorkerEnv } from './env';
 import { dispatchJob } from './dispatch';
 import { createProcessorRegistry } from './processors';
@@ -60,9 +61,23 @@ async function main(): Promise<void> {
     console.log('[worker] DATABASE_URL not set — notifications.send jobs will fail');
   }
 
+  // Scoring (E1): the internal sync engine ships with the worker; the E2
+  // async-external wrapper joins this map when it lands. `queue` lets the
+  // service re-enqueue retries through the same adapter services use.
+  const scoring = env.databaseUrl
+    ? getScoringService({
+        queue: jobQueue,
+        adapters: { sync_internal: createInternalSyncScoringAdapter() },
+      })
+    : undefined;
+  if (!env.databaseUrl) {
+    console.log('[worker] DATABASE_URL not set — scoring.dispatch jobs will fail');
+  }
+
   const registry = createProcessorRegistry({
     health: { getHealth },
     notifications: { service: notifications },
+    scoring: { service: scoring },
   });
   const worker = new Worker(ASSESSIFY_QUEUE_NAME, (job) => dispatchJob(registry, job), {
     connection,

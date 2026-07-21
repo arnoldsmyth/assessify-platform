@@ -21,6 +21,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuditService } from '../audit';
+import type { ScoringDispatcher } from '../scoring/dispatcher';
 import { createQuestionnaireSessionService } from './questionnaire-session-service';
 import type { VisibilityEvaluator } from './visibility';
 
@@ -156,6 +157,16 @@ class FakeSessions implements RespondentSessionRepository {
     this.completed = at;
     if (this.session) this.session = { ...this.session, status: 'completed', completedAt: at };
   }
+  async markAwaitingScores(): Promise<boolean> {
+    if (this.session?.status !== 'completed') return false;
+    this.session = { ...this.session, status: 'awaiting_scores' };
+    return true;
+  }
+  async applyScores(): Promise<boolean> {
+    if (!this.session) return false;
+    this.session = { ...this.session, status: 'scored' };
+    return true;
+  }
 }
 
 function fakeVersions(def: unknown = definition): QuestionnaireVersionRepository {
@@ -280,6 +291,7 @@ function build(overrides: {
   versions?: QuestionnaireVersionRepository;
   audit?: ReturnType<typeof fakeAudit>;
   visibility?: VisibilityEvaluator;
+  scoring?: ScoringDispatcher;
 } = {}) {
   const sessions = overrides.sessions ?? new FakeSessions();
   const responses = overrides.responses ?? new FakeResponses();
@@ -291,6 +303,7 @@ function build(overrides: {
     responses,
     audit,
     visibility: overrides.visibility,
+    scoring: overrides.scoring,
     now: () => NOW,
     newId: () => '01890000-0000-7000-8000-00000000ffff',
   });
@@ -587,6 +600,43 @@ describe('submit', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('questionnaire/already_submitted');
+  });
+
+  // E1 seam: submit → scoring dispatch (spec 08 flow).
+  it('triggers scoring dispatch with the session id after completing', async () => {
+    const dispatch = vi.fn(async () => ok({ jobId: 'job-1', status: 'queued' as const }));
+    const sessions = new FakeSessions();
+    const { service } = build({ sessions, scoring: { dispatch } });
+    await service.loadState(TOKEN);
+    await service.saveAnswers(TOKEN, completeAnswers());
+    const result = await service.submit(TOKEN);
+    expect(result.ok).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith(SESSION_ID);
+    // Dispatch runs only after the session is completed.
+    expect(sessions.completed).toEqual(NOW);
+  });
+
+  it('does not dispatch scoring when submit is rejected', async () => {
+    const dispatch = vi.fn(async () => ok(null));
+    const { service } = build({ scoring: { dispatch } });
+    await service.loadState(TOKEN);
+    const result = await service.submit(TOKEN); // nothing answered
+    expect(result.ok).toBe(false);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('still succeeds when scoring dispatch returns an error result', async () => {
+    const dispatch = vi.fn(async () =>
+      err({ code: 'scoring/queue_unavailable', message: 'no queue' })
+    );
+    const { service, responses } = build({ scoring: { dispatch } });
+    await service.loadState(TOKEN);
+    await service.saveAnswers(TOKEN, completeAnswers());
+    const result = await service.submit(TOKEN);
+    expect(result.ok).toBe(true);
+    expect(responses.rows.get(SESSION_ID)?.status).toBe('submitted');
+    expect(dispatch).toHaveBeenCalledWith(SESSION_ID);
   });
 });
 

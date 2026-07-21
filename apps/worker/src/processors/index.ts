@@ -11,6 +11,7 @@ import type { JobName, JobPayload } from '@assessify/domain';
 import { createHealthPingProcessor, type HealthPingDeps } from './health-ping';
 import { createHeartbeatProcessor } from './heartbeat';
 import { createNotificationSendProcessor, type NotificationsDeps } from './notifications';
+import { createScoringDispatchProcessor, type ScoringDeps } from './scoring';
 
 export type ProcessorRegistry = {
   [N in JobName]: (payload: JobPayload<N>) => Promise<void>;
@@ -19,6 +20,7 @@ export type ProcessorRegistry = {
 export interface ProcessorDeps {
   health: HealthPingDeps;
   notifications: NotificationsDeps;
+  scoring: ScoringDeps;
 }
 
 export function createProcessorRegistry(deps: ProcessorDeps): ProcessorRegistry {
@@ -26,5 +28,6 @@ export function createProcessorRegistry(deps: ProcessorDeps): ProcessorRegistry 
     'health.ping': createHealthPingProcessor(deps.health),
     'maintenance.heartbeat': createHeartbeatProcessor(),
     'notifications.send': createNotificationSendProcessor(deps.notifications),
+    'scoring.dispatch': createScoringDispatchProcessor(deps.scoring),
   };
 }

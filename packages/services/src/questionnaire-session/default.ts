@@ -8,6 +8,7 @@ import {
 
 import { createAuditService } from '../audit';
 import { getRespondentAccessService } from '../respondent-access';
+import type { ScoringDispatcher } from '../scoring/dispatcher';
 import {
   createQuestionnaireSessionService,
   type QuestionnaireSessionService,
@@ -26,8 +27,15 @@ let instance: QuestionnaireSessionService | undefined;
  * everything-visible branching evaluator (C5 swaps the real `showIf`
  * evaluator in here). Lazy so importing @assessify/services never opens a
  * connection at module load (or during `next build`).
+ *
+ * `composition.scoring` (E1 seam) is honoured on FIRST construction only —
+ * pass it from the app's composition root (e.g. `getScoringService({queue})`)
+ * before any request handling; without it, submit skips scoring dispatch
+ * (no-op default) and admin re-scoring catches up later.
  */
-export function getQuestionnaireSessionService(): QuestionnaireSessionService {
+export function getQuestionnaireSessionService(
+  composition: { scoring?: ScoringDispatcher } = {}
+): QuestionnaireSessionService {
   if (!instance) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
@@ -42,6 +50,7 @@ export function getQuestionnaireSessionService(): QuestionnaireSessionService {
       versions: createQuestionnaireVersionRepository(db),
       responses: createResponseRepository(connectionString),
       audit: createAuditService({ auditLogRepository: createAuditLogRepository(db) }),
+      ...(composition.scoring ? { scoring: composition.scoring } : {}),
     });
   }
   return instance;
