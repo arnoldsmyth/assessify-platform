@@ -11,9 +11,14 @@ interface ProductFormProps {
   action: (state: ProductFormState, formData: FormData) => Promise<ProductFormState>;
   defaults?: ProductFormValues;
   submitLabel: string;
+  /**
+   * When set, renders the owning-organization picker (create form only —
+   * reassignment is a separate super_admin control on the product page).
+   */
+  organizations?: { id: string; name: string }[];
 }
 
-export function ProductForm({ action, defaults, submitLabel }: ProductFormProps) {
+export function ProductForm({ action, defaults, submitLabel, organizations }: ProductFormProps) {
   const [state, formAction, pending] = useActionState(action, initialProductFormState);
   const [name, setName] = useState(defaults?.name ?? '');
   const [scoringMode, setScoringMode] = useState(defaults?.scoringConfig.mode ?? 'sync_internal');
@@ -37,6 +42,25 @@ export function ProductForm({ action, defaults, submitLabel }: ProductFormProps)
           <CardDescription>Identity and defaults for this assessment product.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
+          {organizations ? (
+            <Field
+              label="Organization"
+              name="organizationId"
+              error={errors.organizationId}
+              hint="The product owner company. Reassignable later from the product page."
+            >
+              <Select id="organizationId" name="organizationId" defaultValue="" required>
+                <option value="" disabled>
+                  Choose an organization…
+                </option>
+                {organizations.map((organization) => (
+                  <option key={organization.id} value={organization.id}>
+                    {organization.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           <Field label="Name" name="name" error={errors.name}>
             <Input
               id="name"
@@ -84,6 +108,21 @@ export function ProductForm({ action, defaults, submitLabel }: ProductFormProps)
               <option value="letter">Letter</option>
             </Select>
           </Field>
+          <label className="flex items-center gap-2 text-sm font-medium text-ink sm:col-span-2">
+            <input
+              type="checkbox"
+              name="defaultAccess"
+              defaultChecked={defaults?.defaultAccess ?? true}
+              className="size-4 accent-[var(--color-primary)]"
+            />
+            <span>
+              Default access
+              <span className="ml-2 font-normal text-muted">
+                Available to all the organization&rsquo;s clients. Untick to restrict it to
+                per-client grants (managed on the client access page).
+              </span>
+            </span>
+          </label>
         </CardContent>
       </Card>
 

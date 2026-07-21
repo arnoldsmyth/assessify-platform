@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
-import { getProductService } from '@assessify/services';
+import { getOrganizationService, getProductService } from '@assessify/services';
 
 import { requireCallerContext } from '@/lib/caller-context';
 
@@ -31,6 +31,32 @@ export async function updateProductAction(
   revalidatePath('/admin/products');
   revalidatePath(`/admin/products/${id}`);
   redirect('/admin/products');
+}
+
+/**
+ * Move the product to another organization (super_admin — spec: platform
+ * assigns products). Deliberately NOT part of the ordinary edit form: it is
+ * an explicit service operation with its own audit action.
+ */
+export async function reassignProductOrganizationAction(
+  productId: string,
+  formData: FormData
+): Promise<void> {
+  const caller = await requireCallerContext();
+  const organizationId = String(formData.get('organizationId') ?? '');
+  const result = await getOrganizationService().assignProductToOrg(
+    caller,
+    productId,
+    organizationId
+  );
+  if (!result.ok) {
+    // Row action without a form-state channel; the ids come from a
+    // server-rendered select, so an expected failure still surfaces loudly.
+    throw new Error(result.error.message);
+  }
+  revalidatePath('/admin/products');
+  revalidatePath(`/admin/products/${productId}`);
+  revalidatePath(`/admin/organizations/${organizationId}`);
 }
 
 export async function archiveProductAction(id: string): Promise<void> {

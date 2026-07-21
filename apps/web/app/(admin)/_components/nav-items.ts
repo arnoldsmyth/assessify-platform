@@ -3,6 +3,7 @@ import {
   ClipboardList,
   FileChartColumn,
   Globe,
+  Landmark,
   LayoutDashboard,
   ListChecks,
   Package,
@@ -17,13 +18,17 @@ export interface AdminNavItem {
   label: string;
   href: string;
   icon: LucideIcon;
+  /** Hidden unless the caller is super_admin or an org admin (M4). */
+  requiresOrgScope?: boolean;
 }
 
 // Admin sections + lucide mappings per docs/spec/15-brand-design-system.md.
-// Sentence case everywhere (spec 15, voice).
+// Sentence case everywhere (spec 15, voice). Landmark for organizations —
+// Building2 is taken by clients.
 export const adminNavItems: AdminNavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { label: 'Orders', href: '/admin/orders', icon: ClipboardList },
+  { label: 'Organizations', href: '/admin/organizations', icon: Landmark, requiresOrgScope: true },
   { label: 'Clients', href: '/admin/clients', icon: Building2 },
   { label: 'Products', href: '/admin/products', icon: Package },
   { label: 'Respondents', href: '/admin/respondents', icon: Users },

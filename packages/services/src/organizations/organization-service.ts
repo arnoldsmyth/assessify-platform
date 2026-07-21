@@ -60,6 +60,15 @@ export interface OrganizationService {
     organizationId: string
   ): Promise<Result<Product>>;
   /**
+   * Read one product through the org-catalogue authorization (org admin of
+   * the product's org, or super_admin). Product CRUD stays super_admin
+   * (product service); this read exists so org admins can see the product
+   * they are pricing / granting access to.
+   */
+  getManagedProduct(caller: CallerContext, productId: string): Promise<Result<Product>>;
+  /** The organization's products, name A→Z. Org admin of the org, or super_admin. */
+  listOrgProducts(caller: CallerContext, organizationId: string): Promise<Result<Product[]>>;
+  /**
    * Create-or-overwrite one price-list row (product, language, currency) →
    * integer minor units. Org admin of the product's org, or super_admin.
    * The language must be one of the product's availableLanguages.
@@ -342,6 +351,29 @@ export function createOrganizationService(deps: OrganizationServiceDeps): Organi
       );
       if (!audited.ok) return err(audited.error);
       return ok(updated);
+    },
+
+    async getManagedProduct(caller, productId) {
+      return resolveManagedProduct(caller, productId);
+    },
+
+    async listOrgProducts(caller, organizationId) {
+      if (!UUID_RE.test(organizationId)) return err(notFound(organizationId));
+      if (!canManageOrg(caller, organizationId)) {
+        return err(
+          forbidden(caller, 'Only super admins or the organization’s admins can view its products')
+        );
+      }
+      const organization = await organizations.findById(organizationId);
+      if (!organization) return err(notFound(organizationId));
+      // No org filter on the product repo yet — mirror listOrderable's
+      // bounded scan and filter here (catalogue sizes are small).
+      const page = await products.list({ limit: 500, offset: 0 });
+      return ok(
+        page.items
+          .filter((product) => product.organizationId === organizationId)
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
     },
 
     async upsertPrice(caller, input) {

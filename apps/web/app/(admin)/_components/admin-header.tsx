@@ -2,14 +2,17 @@
 
 import { usePathname } from 'next/navigation';
 
+import type { CallerContextOption } from '@assessify/domain';
+
+import { ContextIndicator } from './context-indicator';
 import { adminNavItems } from './nav-items';
 
 /**
  * Breadcrumb + page-actions header (spec 15 admin layout). Breadcrumb is
- * derived from the nav config for now; page actions are rendered by pages
- * into the right-hand slot once real sections land.
+ * derived from the nav config for now; the right-hand slot carries the
+ * caller's context indicator (M4 — full switcher lands with J2).
  */
-export function AdminHeader() {
+export function AdminHeader({ contexts = [] }: { contexts?: CallerContextOption[] }) {
   const pathname = usePathname();
   const section = adminNavItems.find((item) =>
     item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href)
@@ -28,8 +31,9 @@ export function AdminHeader() {
           </>
         ) : null}
       </nav>
-      {/* Page actions slot — populated per page when sections are built. */}
-      <div className="flex items-center gap-2" />
+      <div className="flex items-center gap-2">
+        <ContextIndicator contexts={contexts} />
+      </div>
     </header>
   );
 }

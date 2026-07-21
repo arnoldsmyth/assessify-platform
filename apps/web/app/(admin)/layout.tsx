@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
-import { isSuperAdmin } from '@assessify/domain';
-import { getErrorQueueService } from '@assessify/services';
+import { isSuperAdmin, orgScopeIds, type CallerContextOption } from '@assessify/domain';
+import { getErrorQueueService, getOrganizationService } from '@assessify/services';
 
 import { requireCallerContext } from '@/lib/caller-context';
 
@@ -31,11 +31,21 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     if (counts?.ok) errorCount = counts.value.total;
   }
 
+  // Context indicator (M4, minimal — full switcher lands with J2). Best
+  // effort: a failed lookup never breaks the shell.
+  let contexts: CallerContextOption[] = [];
+  const contextsResult = await getOrganizationService()
+    .listContexts(caller)
+    .catch(() => null);
+  if (contextsResult?.ok) contexts = contextsResult.value;
+
+  const hasOrgScope = isSuperAdmin(caller) || orgScopeIds(caller).length > 0;
+
   return (
     <div className="flex min-h-screen text-sm">
-      <AdminSidebar errorCount={errorCount} />
+      <AdminSidebar errorCount={errorCount} hasOrgScope={hasOrgScope} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <AdminHeader />
+        <AdminHeader contexts={contexts} />
         <main className="flex-1 overflow-y-auto bg-surface-page p-6">{children}</main>
       </div>
     </div>
