@@ -89,7 +89,8 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     retailEnabled: false,
     retailPrice: null,
     retailCurrency: null,
-    connectedStripeAccountId: null,
+    organizationId: '01900000-0000-7000-8000-00000000aaaa',
+    defaultAccess: true,
     revenueSplitPct: null,
     royaltyPolicy: null,
     timezone: 'UTC',
@@ -118,14 +119,14 @@ const noPermissions = {
 const superAdmin: CallerContext = {
   kind: 'user',
   id: '01890a5d-ac96-774b-bcce-b302099a0100',
-  roles: [{ role: 'super_admin', productId: null, clientId: null, permissions: fullPermissions }],
+  roles: [{ role: 'super_admin', organizationId: null, productId: null, clientId: null, permissions: fullPermissions }],
 };
 
 const clientAdmin: CallerContext = {
   kind: 'user',
   id: '01890a5d-ac96-774b-bcce-b302099a0101',
   roles: [
-    { role: 'client_admin', productId: null, clientId: CLIENT_ID, permissions: fullPermissions },
+    { role: 'client_admin', organizationId: null, productId: null, clientId: CLIENT_ID, permissions: fullPermissions },
   ],
 };
 
@@ -135,6 +136,7 @@ const otherClientAdmin: CallerContext = {
   roles: [
     {
       role: 'client_admin',
+      organizationId: null,
       productId: null,
       clientId: '01890a5d-ac96-774b-bcce-b302099a0999',
       permissions: fullPermissions,
@@ -148,6 +150,7 @@ const orderingClientUser: CallerContext = {
   roles: [
     {
       role: 'client_user',
+      organizationId: null,
       productId: null,
       clientId: CLIENT_ID,
       permissions: { ...noPermissions, canPlaceOrders: true },
@@ -159,7 +162,7 @@ const readOnlyClientUser: CallerContext = {
   kind: 'user',
   id: '01890a5d-ac96-774b-bcce-b302099a0104',
   roles: [
-    { role: 'client_user', productId: null, clientId: CLIENT_ID, permissions: noPermissions },
+    { role: 'client_user', organizationId: null, productId: null, clientId: CLIENT_ID, permissions: noPermissions },
   ],
 };
 
