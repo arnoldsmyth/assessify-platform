@@ -1,10 +1,10 @@
 import {
-  boolean,
   char,
   index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -14,17 +14,23 @@ import {
 import { user } from './auth';
 import { roleName } from './enums';
 import { citext } from './helpers';
+import { organizations } from './organizations';
 import { products } from './catalogue';
 
-// Parties (04 — Data Model)
+// Parties (04 — Data Model; org hierarchy per owner decisions 2026-07-21)
 
 export const clients = pgTable('clients', {
   id: uuid('id').primaryKey(),
+  /**
+   * Owning organization. The same real-world company as a client of two orgs
+   * = two client rows; within a context clients only see that org's products.
+   */
+  organizationId: uuid('organization_id')
+    .notNull()
+    .references(() => organizations.id),
   /** from client_number_seq; used in INV reference */
   clientNumber: integer('client_number').unique().notNull(),
   name: text('name').notNull(),
-  /** exactly one row true: the retail umbrella client */
-  isPlatformRetail: boolean('is_platform_retail').notNull().default(false),
   billingEmail: text('billing_email'),
   billingAddress: jsonb('billing_address'),
   defaultCurrency: char('default_currency', { length: 3 }).notNull().default('EUR'),
@@ -59,7 +65,9 @@ export const roleAssignments = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     role: roleName('role').notNull(),
-    /** required for assessment_admin */
+    /** required for assessment_admin (org-scoped since M2 re-scope) */
+    organizationId: uuid('organization_id').references(() => organizations.id),
+    /** legacy product scope — kept for now; assessment_admin checks use the org */
     productId: uuid('product_id').references(() => products.id),
     /** required for client_admin / client_user */
     clientId: uuid('client_id').references(() => clients.id),
@@ -67,7 +75,26 @@ export const roleAssignments = pgTable(
     permissions: jsonb('permissions').notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique().on(t.userId, t.role, t.productId, t.clientId)]
+  (t) => [unique().on(t.userId, t.role, t.organizationId, t.productId, t.clientId)]
+);
+
+/**
+ * Explicit per-client grants for restricted products (products with
+ * `default_access = false`, e.g. custom products). Org-default products need
+ * no rows here.
+ */
+export const clientProductAccess = pgTable(
+  'client_product_access',
+  {
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.clientId, t.productId] })]
 );
 
 /** Persistent identity across a lifetime of assessments. */

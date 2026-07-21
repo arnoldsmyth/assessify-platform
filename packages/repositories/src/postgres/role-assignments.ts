@@ -17,6 +17,7 @@ export function createRoleAssignmentRepository(connectionString: string): RoleAs
       const rows = await db
         .select({
           role: roleAssignments.role,
+          organizationId: roleAssignments.organizationId,
           productId: roleAssignments.productId,
           clientId: roleAssignments.clientId,
           permissions: roleAssignments.permissions,
@@ -28,6 +29,7 @@ export function createRoleAssignmentRepository(connectionString: string): RoleAs
       return rows.map((row) =>
         roleAssignmentSchema.parse({
           role: row.role,
+          organizationId: row.organizationId,
           productId: row.productId,
           clientId: row.clientId,
           permissions: row.permissions ?? {},

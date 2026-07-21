@@ -2,6 +2,7 @@ import {
   createAuditLogRepository,
   createOrderRepository,
   createPaymentRepository,
+  DrizzleProductRepository,
   getDbHandle,
 } from '@assessify/repositories';
 
@@ -39,7 +40,11 @@ export function getPaymentService(adapters: PaymentServiceAdapters = {}): Paymen
   return createPaymentService({
     payments: createPaymentRepository(db),
     orders,
-    orderService: createOrderService({ orders, audit }),
+    orderService: createOrderService({
+      orders,
+      products: new DrizzleProductRepository(db),
+      audit,
+    }),
     audit,
     adapters,
   });

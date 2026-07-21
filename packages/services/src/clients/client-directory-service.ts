@@ -3,6 +3,7 @@ import {
   isSuperAdmin,
   ok,
   err,
+  orgScopeIds,
   type CallerContext,
   type DomainError,
   type Result,
@@ -11,21 +12,24 @@ import type { ClientRepository, ClientSummary } from '@assessify/repositories';
 
 /**
  * Read-only client directory for the ordering surfaces (D2 — spec 06 wizard
- * step 1 "Choose client (super admin)"; spec 05 scoping). Client lifecycle
- * management (create/update/users) lands with its own epic — this service
- * only answers "which clients may this caller see / order for?".
+ * step 1 "Choose client (super admin)"; spec 05 scoping, org re-scope per
+ * owner decisions 2026-07-21). Client lifecycle management (create/update/
+ * users) lands with its own epic — this service only answers "which clients
+ * may this caller see / order for?".
  */
 
 export interface ClientDirectoryService {
   /**
    * Clients the caller may place orders for (spec 05: super_admin = any
    * client; client_admin / client_user with canPlaceOrders = their own).
+   * Org-scoped assessment_admins are read-only — they get nothing here.
    * An empty list means the caller holds ordering-capable roles nowhere.
    */
   listPlaceable(caller: CallerContext): Promise<Result<ClientSummary[]>>;
   /**
    * Clients visible to the caller for display/filtering (orders list):
-   * super_admin sees all, client-scoped roles see their own clients.
+   * super_admin sees all, client-scoped roles see their own clients, and
+   * org-scoped assessment_admins see all their organization's clients (M2).
    */
   listVisible(caller: CallerContext): Promise<Result<ClientSummary[]>>;
 }
@@ -68,7 +72,17 @@ export function createClientDirectoryService(
           ),
         ]
       : clientScopeIds(caller);
-    return ok(await clients.findByIds(ids));
+    const own = await clients.findByIds(ids);
+    if (placeableOnly) return ok(own);
+
+    // Visibility (not ordering) extends to the caller's organizations: an
+    // org-scoped assessment_admin sees every client of their orgs (M2).
+    const orgClients = await clients.listByOrganizationIds(orgScopeIds(caller));
+    const merged = new Map(own.map((client) => [client.id, client]));
+    for (const client of orgClients) merged.set(client.id, client);
+    return ok(
+      [...merged.values()].sort((a, b) => a.name.localeCompare(b.name))
+    );
   }
 
   return {

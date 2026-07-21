@@ -11,11 +11,12 @@ import { asc, inArray } from 'drizzle-orm';
 
 export interface ClientSummary {
   id: string;
+  /** Owning organization (M1 — clients belong to an org). */
+  organizationId: string;
   /** From client_number_seq; used in INV references (display only). */
   clientNumber: number;
   name: string;
   defaultCurrency: string;
-  isPlatformRetail: boolean;
 }
 
 export interface ClientRepository {
@@ -23,29 +24,31 @@ export interface ClientRepository {
   listAll(): Promise<ClientSummary[]>;
   /** The named clients, name A→Z; unknown ids are simply absent. */
   findByIds(ids: string[]): Promise<ClientSummary[]>;
+  /** All clients of the named organizations, name A→Z (org-admin scoping). */
+  listByOrganizationIds(organizationIds: string[]): Promise<ClientSummary[]>;
 }
 
 type ClientRow = Pick<
   typeof clients.$inferSelect,
-  'id' | 'clientNumber' | 'name' | 'defaultCurrency' | 'isPlatformRetail'
+  'id' | 'organizationId' | 'clientNumber' | 'name' | 'defaultCurrency'
 >;
 
 function toSummary(row: ClientRow): ClientSummary {
   return {
     id: row.id,
+    organizationId: row.organizationId,
     clientNumber: row.clientNumber,
     name: row.name,
     defaultCurrency: row.defaultCurrency,
-    isPlatformRetail: row.isPlatformRetail,
   };
 }
 
 const summaryColumns = {
   id: clients.id,
+  organizationId: clients.organizationId,
   clientNumber: clients.clientNumber,
   name: clients.name,
   defaultCurrency: clients.defaultCurrency,
-  isPlatformRetail: clients.isPlatformRetail,
 };
 
 export function createClientRepository(db: Database): ClientRepository {
@@ -61,6 +64,16 @@ export function createClientRepository(db: Database): ClientRepository {
         .select(summaryColumns)
         .from(clients)
         .where(inArray(clients.id, ids))
+        .orderBy(asc(clients.name));
+      return rows.map(toSummary);
+    },
+
+    async listByOrganizationIds(organizationIds) {
+      if (organizationIds.length === 0) return [];
+      const rows = await db
+        .select(summaryColumns)
+        .from(clients)
+        .where(inArray(clients.organizationId, organizationIds))
         .orderBy(asc(clients.name));
       return rows.map(toSummary);
     },

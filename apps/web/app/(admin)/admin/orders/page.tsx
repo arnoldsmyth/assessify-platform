@@ -6,7 +6,7 @@ import {
   isSuperAdmin,
   orderStatusSchema,
   orderTypeSchema,
-  productScopeIds,
+  orgScopeIds,
   type Order,
   type OrderStatus,
   type OrderType,
@@ -57,26 +57,26 @@ export default async function OrdersPage({
 
   // Scope resolution (spec 05: non-super queries must be scoped): super_admin
   // filters freely; client-scoped callers default to their first client;
-  // assessment_admins fall back to their product scope.
+  // org-scoped assessment_admins fall back to their organization (M2).
   const superAdmin = isSuperAdmin(caller);
   const requestedClientId =
     params.client && UUID_RE.test(params.client) ? params.client : undefined;
   let clientId: string | undefined;
-  let productId: string | undefined;
+  let organizationId: string | undefined;
   if (superAdmin) {
     clientId = requestedClientId;
   } else {
     const scope = clientScopeIds(caller);
     clientId =
       requestedClientId && scope.includes(requestedClientId) ? requestedClientId : scope[0];
-    if (!clientId) productId = productScopeIds(caller)[0];
+    if (!clientId) organizationId = orgScopeIds(caller)[0];
   }
 
-  const canQuery = superAdmin || clientId !== undefined || productId !== undefined;
+  const canQuery = superAdmin || clientId !== undefined || organizationId !== undefined;
   const result = canQuery
     ? await getOrderService().list(caller, {
         ...(clientId ? { clientId } : {}),
-        ...(productId ? { productId } : {}),
+        ...(organizationId ? { organizationId } : {}),
         ...(status ? { status } : {}),
         ...(type ? { type } : {}),
         page,
@@ -156,7 +156,7 @@ export default async function OrdersPage({
 
       {!canQuery ? (
         <Card className="p-6 text-sm text-muted">
-          You do not have a client or product scope that can view orders.
+          You do not have a client or organization scope that can view orders.
         </Card>
       ) : result && result.ok ? (
         <OrderTable

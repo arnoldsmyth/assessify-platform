@@ -1,6 +1,7 @@
 import {
   orderItems,
   orders,
+  products,
   respondentSessions,
   respondents,
   type Database,
@@ -73,6 +74,8 @@ export interface OrderStatusPatch {
 export interface OrderListQuery {
   clientId?: string;
   productId?: string;
+  /** Orders of the org's products (resolved through `products.organization_id`). */
+  organizationId?: string;
   status?: OrderStatus;
   type?: OrderType;
   limit: number;
@@ -388,6 +391,18 @@ export function createOrderRepository(db: Database): OrderRepository {
       const conditions: SQL[] = [];
       if (query.clientId) conditions.push(eq(orders.clientId, query.clientId));
       if (query.productId) conditions.push(eq(orders.productId, query.productId));
+      if (query.organizationId) {
+        // Org scope resolves through the product (orders carry product_id only).
+        conditions.push(
+          inArray(
+            orders.productId,
+            db
+              .select({ id: products.id })
+              .from(products)
+              .where(eq(products.organizationId, query.organizationId))
+          )
+        );
+      }
       if (query.status) conditions.push(eq(orders.status, query.status));
       if (query.type) conditions.push(eq(orders.type, query.type));
       const where = conditions.length > 0 ? and(...conditions) : undefined;

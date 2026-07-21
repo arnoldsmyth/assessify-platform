@@ -1,5 +1,12 @@
-import { ok, type CallerContext, type Product, type RoleAssignment } from '@assessify/domain';
+import {
+  ok,
+  type CallerContext,
+  type Organization,
+  type Product,
+  type RoleAssignment,
+} from '@assessify/domain';
 import type {
+  OrganizationRepository,
   ProductListQuery,
   ProductPatch,
   ProductRepository,
@@ -9,9 +16,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AuditService } from '../audit';
 import { createProductService } from './product-service';
 
+const ORG_ID = '01890000-0000-7000-8000-0000000000a1';
+
 function assignment(role: RoleAssignment['role'], clientId: string | null = null): RoleAssignment {
   return {
     role,
+    organizationId: null,
     productId: null,
     clientId,
     permissions: {
@@ -38,9 +48,11 @@ const clientAdmin: CallerContext = {
 function fixtureProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: '01890000-0000-7000-8000-000000000001',
+    organizationId: ORG_ID,
     slug: 'pro-d',
     name: 'PRO-D',
     status: 'active',
+    defaultAccess: true,
     branding: {},
     defaultLanguage: 'en',
     availableLanguages: ['en'],
@@ -51,7 +63,6 @@ function fixtureProduct(overrides: Partial<Product> = {}): Product {
     retailEnabled: false,
     retailPrice: null,
     retailCurrency: null,
-    connectedStripeAccountId: null,
     revenueSplitPct: null,
     royaltyPolicy: null,
     timezone: 'Europe/Dublin',
@@ -113,11 +124,46 @@ function makeAudit(): AuditService {
   } as unknown as AuditService;
 }
 
+function makeOrganizationsRepo(): OrganizationRepository {
+  const organization: Organization = {
+    id: ORG_ID,
+    name: 'PRO-D Publishing',
+    slug: 'pro-d-publishing',
+    status: 'active',
+    connectedStripeAccountId: null,
+    settlementEmail: null,
+    settlementCurrency: 'EUR',
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+  return {
+    async findById(id) {
+      return id === ORG_ID ? organization : null;
+    },
+    async findBySlug() {
+      return null;
+    },
+    async findByIds(ids) {
+      return ids.includes(ORG_ID) ? [organization] : [];
+    },
+    async insert(value) {
+      return value;
+    },
+    async update() {
+      return null;
+    },
+    async listAll() {
+      return [organization];
+    },
+  };
+}
+
 function makeService(seed: Product[] = []) {
   const { repo, rows } = makeRepo(seed);
   const audit = makeAudit();
   const service = createProductService({
     products: repo,
+    organizations: makeOrganizationsRepo(),
     audit,
     now: () => new Date('2026-07-14T12:00:00Z'),
   });
@@ -129,6 +175,7 @@ describe('productService.create', () => {
     const { service, rows, audit } = makeService();
 
     const result = await service.create(superAdmin, {
+      organizationId: ORG_ID,
       slug: 'insight-360',
       name: 'Insight 360',
     });
@@ -163,6 +210,7 @@ describe('productService.create', () => {
     const { service } = makeService();
 
     const result = await service.create(superAdmin, {
+      organizationId: ORG_ID,
       slug: 'insight-360',
       name: 'Insight 360',
       branding: {
@@ -179,10 +227,23 @@ describe('productService.create', () => {
     }
   });
 
+  it('rejects an unknown organization', async () => {
+    const { service } = makeService();
+
+    const result = await service.create(superAdmin, {
+      organizationId: '01890000-0000-7000-8000-00000000dead',
+      slug: 'insight-360',
+      name: 'Insight 360',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('product/organization_not_found');
+  });
+
   it('rejects a duplicate slug', async () => {
     const { service } = makeService([fixtureProduct()]);
 
-    const result = await service.create(superAdmin, { slug: 'pro-d', name: 'Copycat' });
+    const result = await service.create(superAdmin, { organizationId: ORG_ID, slug: 'pro-d', name: 'Copycat' });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -194,6 +255,7 @@ describe('productService.create', () => {
     const { service } = makeService();
 
     const result = await service.create(superAdmin, {
+      organizationId: ORG_ID,
       slug: 'insight-360',
       name: 'Insight 360',
       branding: {
@@ -216,7 +278,7 @@ describe('productService.create', () => {
     const { service } = makeService();
 
     for (const slug of ['app', 'www', 'Bad-Slug', '-leading', 'trailing-', 'a']) {
-      const result = await service.create(superAdmin, { slug, name: 'X' });
+      const result = await service.create(superAdmin, { organizationId: ORG_ID, slug, name: 'X' });
       expect(result.ok, `slug "${slug}" should be rejected`).toBe(false);
       if (!result.ok) expect(result.error.code).toBe('product/validation');
     }
@@ -226,6 +288,7 @@ describe('productService.create', () => {
     const { service } = makeService();
 
     const retail = await service.create(superAdmin, {
+      organizationId: ORG_ID,
       slug: 'insight-360',
       name: 'Insight 360',
       retailEnabled: true,
@@ -239,6 +302,7 @@ describe('productService.create', () => {
     }
 
     const language = await service.create(superAdmin, {
+      organizationId: ORG_ID,
       slug: 'insight-360',
       name: 'Insight 360',
       defaultLanguage: 'fr',

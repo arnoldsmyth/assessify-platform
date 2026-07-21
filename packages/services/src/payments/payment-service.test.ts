@@ -21,7 +21,7 @@ const PAYMENT_ID = '01890000-0000-7000-8000-00000000aaaa';
 const superAdmin: CallerContext = {
   kind: 'user',
   id: '11111111-1111-7111-8111-111111111111',
-  roles: [{ role: 'super_admin', productId: null, clientId: null, permissions: { products: [], groups: [], canPlaceOrders: false, canViewResults: false, canReleaseReports: false } }],
+  roles: [{ role: 'super_admin', organizationId: null, productId: null, clientId: null, permissions: { products: [], groups: [], canPlaceOrders: false, canViewResults: false, canReleaseReports: false } }],
 };
 
 function order(overrides: Partial<Order> = {}): Order {

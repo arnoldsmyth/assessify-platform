@@ -2,11 +2,12 @@ import {
   err,
   isSuperAdmin,
   ok,
-  productScopeIds,
+  orgScopeIds,
   uuidv7,
   type AuditActor,
   type CallerContext,
   type DomainError,
+  type Product,
   type Result,
 } from '@assessify/domain';
 import { validateDefinition } from '@assessify/questionnaire-schema';
@@ -29,8 +30,10 @@ import { canBrowseOrderCatalogue } from '../products/product-service';
  * language-agnostic — all copy is translation string keys). Versions are
  * immutable once active; a superseded active version becomes `retired`.
  *
- * Authorization (spec 05 permission matrix, "Manage questionnaire versions"):
- * super_admin, or assessment_admin scoped to the product.
+ * Authorization (spec 05 permission matrix, "Manage questionnaire versions",
+ * re-scoped per owner decisions 2026-07-21): super_admin, or assessment_admin
+ * scoped to the product's ORGANIZATION — "may manage this product" resolves
+ * through `product.organizationId`.
  */
 
 export interface QuestionnaireVersionService {
@@ -112,10 +115,13 @@ function forbidden(caller: CallerContext): DomainError {
   };
 }
 
-/** Spec 05: manage questionnaire versions = super_admin or assessment_admin of the product. */
-function canManage(caller: CallerContext, productId: string): boolean {
+/**
+ * Spec 05 re-scoped (M2): manage questionnaire versions = super_admin, or
+ * assessment_admin of the product's organization.
+ */
+function canManage(caller: CallerContext, product: Product): boolean {
   if (isSuperAdmin(caller)) return true;
-  return caller.kind === 'user' && productScopeIds(caller).includes(productId);
+  return caller.kind === 'user' && orgScopeIds(caller).includes(product.organizationId);
 }
 
 function notFound(id: string): DomainError {
@@ -170,10 +176,9 @@ export function createQuestionnaireVersionService(
       }
       const { productId, variant } = parsed.data;
 
-      if (!canManage(caller, productId)) return err(forbidden(caller));
-
       const product = await products.findById(productId);
       if (!product) return err(productNotFound(productId));
+      if (!canManage(caller, product)) return err(forbidden(caller));
 
       // Shape + semantic rules (spec 07) — line-item issues go back to the UI.
       const validated = validateDefinition(parsed.data.definition);
@@ -212,7 +217,9 @@ export function createQuestionnaireVersionService(
       if (!UUID_RE.test(id)) return err(notFound(id));
       const existing = await questionnaireVersions.findById(id);
       if (!existing) return err(notFound(id));
-      if (!canManage(caller, existing.productId)) return err(forbidden(caller));
+      const product = await products.findById(existing.productId);
+      if (!product) return err(productNotFound(existing.productId));
+      if (!canManage(caller, product)) return err(forbidden(caller));
 
       if (existing.status === 'active') return ok(existing);
       if (existing.status === 'retired') {
@@ -257,7 +264,9 @@ export function createQuestionnaireVersionService(
       if (!UUID_RE.test(id)) return err(notFound(id));
       const existing = await questionnaireVersions.findById(id);
       if (!existing) return err(notFound(id));
-      if (!canManage(caller, existing.productId)) return err(forbidden(caller));
+      const product = await products.findById(existing.productId);
+      if (!product) return err(productNotFound(existing.productId));
+      if (!canManage(caller, product)) return err(forbidden(caller));
 
       if (existing.status === 'retired') return ok(existing);
 
@@ -281,22 +290,22 @@ export function createQuestionnaireVersionService(
 
     async listByProduct(caller, productId) {
       if (!UUID_RE.test(productId)) return err(productNotFound(productId));
-      if (!canManage(caller, productId)) return err(forbidden(caller));
 
       const product = await products.findById(productId);
       if (!product) return err(productNotFound(productId));
+      if (!canManage(caller, product)) return err(forbidden(caller));
 
       return ok(await questionnaireVersions.listByProduct(productId));
     },
 
     async listActiveForOrdering(caller, productId) {
       if (!UUID_RE.test(productId)) return err(productNotFound(productId));
-      if (!canBrowseOrderCatalogue(caller) && !canManage(caller, productId)) {
-        return err(forbidden(caller));
-      }
 
       const product = await products.findById(productId);
       if (!product) return err(productNotFound(productId));
+      if (!canBrowseOrderCatalogue(caller) && !canManage(caller, product)) {
+        return err(forbidden(caller));
+      }
 
       const versions = await questionnaireVersions.listByProduct(productId);
       return ok(

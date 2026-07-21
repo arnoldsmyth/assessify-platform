@@ -161,8 +161,12 @@ export function productInvariantIssues(input: ProductInvariantsInput): ProductIn
 
 export const createProductSchema = z
   .object({
+    /** Owning organization — platform assigns products to orgs (owner decision 2026-07-21). */
+    organizationId: z.string().uuid(),
     slug: productSlugSchema,
     name: productNameSchema,
+    /** True = available to all the org's clients; false = per-client grants. */
+    defaultAccess: z.boolean().default(true),
     branding: brandingConfigSchema.default({}),
     defaultLanguage: languageTagSchema.default('en'),
     availableLanguages: z.array(languageTagSchema).min(1).default(['en']),
@@ -201,6 +205,8 @@ export const updateProductSchema = z
   .object({
     slug: productSlugSchema.optional(),
     name: productNameSchema.optional(),
+    /** Org reassignment is NOT here — use the explicit assignProductToOrg operation. */
+    defaultAccess: z.boolean().optional(),
     branding: brandingConfigSchema.optional(),
     defaultLanguage: languageTagSchema.optional(),
     availableLanguages: z.array(languageTagSchema).min(1).optional(),
@@ -234,10 +240,14 @@ export type ListProductsQuery = z.output<typeof listProductsQuerySchema>;
 
 export interface Product {
   id: string;
+  /** Owning organization (product owner company). */
+  organizationId: string;
   /** DNS-label slug; serves {slug}.assessify.ie (spec 11). */
   slug: string;
   name: string;
   status: ProductStatus;
+  /** True = org-default (all the org's clients); false = restricted (grants). */
+  defaultAccess: boolean;
   branding: BrandingConfig;
   defaultLanguage: string;
   availableLanguages: string[];
@@ -249,7 +259,7 @@ export interface Product {
   /** Integer minor units. */
   retailPrice: number | null;
   retailCurrency: string | null;
-  connectedStripeAccountId: string | null;
+  /** Royalty RATES stay per product; settlement identity lives on the org. */
   revenueSplitPct: number | null;
   royaltyPolicy: Record<string, unknown> | null;
   timezone: string;

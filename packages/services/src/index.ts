@@ -5,6 +5,7 @@ export * from './health';
 export * from './invitations';
 export * from './orders';
 export * from './notifications';
+export * from './organizations';
 export * from './payments';
 export * from './products';
 export * from './questionnaire-session';

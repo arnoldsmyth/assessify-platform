@@ -18,9 +18,11 @@ const hosts: TenantHostConfig = {
 function fixtureProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: '01890000-0000-7000-8000-000000000001',
+    organizationId: '01890000-0000-7000-8000-0000000000a1',
     slug: 'pro-d',
     name: 'PRO-D',
     status: 'active',
+    defaultAccess: true,
     branding: { colors: { primary: '#123456' }, logoUrl: 'https://cdn.example.com/logo.svg' },
     defaultLanguage: 'en',
     availableLanguages: ['en'],
@@ -31,7 +33,6 @@ function fixtureProduct(overrides: Partial<Product> = {}): Product {
     retailEnabled: false,
     retailPrice: null,
     retailCurrency: null,
-    connectedStripeAccountId: null,
     revenueSplitPct: null,
     royaltyPolicy: null,
     timezone: 'Europe/Dublin',
