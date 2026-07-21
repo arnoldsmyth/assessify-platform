@@ -1,0 +1,878 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Scoring Engine API",
+    "version": "2.0",
+    "description": "Data-only scoring API (no report generation). Synchronous scoring with optional HMAC-signed webhooks. Scoring scopes are requestable à la carte; every scored result records the norm set used."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/v2/assessments": {
+      "post": {
+        "summary": "Create an assessment from registration info",
+        "operationId": "createAssessment",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "firstname",
+                  "lastname",
+                  "email",
+                  "language"
+                ],
+                "properties": {
+                  "firstname": {
+                    "type": "string"
+                  },
+                  "middlename": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "lastname": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "en",
+                      "fr",
+                      "pt"
+                    ]
+                  },
+                  "gender": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "M",
+                      "F",
+                      null
+                    ],
+                    "description": "Required for scopes touching the S/P dimensions unless an explicit `norms` value is passed when scoring (gender-split norms, docs 04/06)."
+                  },
+                  "dob": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date",
+                    "description": "Never used in scoring."
+                  },
+                  "external_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Client correlation key, echoed everywhere."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/assessments/{id}/tools/{tool}": {
+      "put": {
+        "summary": "Submit or replace one tool's responses (validated on write)",
+        "operationId": "submitTool",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AssessmentId"
+          },
+          {
+            "name": "tool",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "reflections",
+                "personalmotivators",
+                "areamissions",
+                "abilitiesfilter",
+                "personalstyle",
+                "personalexpectations",
+                "person",
+                "role",
+                "organization"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "responses"
+                ],
+                "properties": {
+                  "responses": {
+                    "description": "Either a {q: a} map or a list of {q, a} items; q is 1-based.",
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "q",
+                            "a"
+                          ],
+                          "properties": {
+                            "q": {
+                              "type": "integer"
+                            },
+                            "a": []
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Structured per-item validation errors {tool, q, rule, expected, got}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/assessments/{id}/score": {
+      "post": {
+        "summary": "Score the assessment for the requested scopes (synchronous)",
+        "operationId": "scoreAssessment",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AssessmentId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "mcs.m",
+                        "mcs.c",
+                        "mcs.s",
+                        "mcs",
+                        "pro.person",
+                        "pro.role",
+                        "pro.org",
+                        "insights",
+                        "reflections",
+                        "full"
+                      ]
+                    },
+                    "default": [
+                      "full"
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "keys",
+                      "strings"
+                    ],
+                    "default": "keys"
+                  },
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "en",
+                      "fr",
+                      "pt"
+                    ],
+                    "description": "Content language for strings format; defaults to the registration language."
+                  },
+                  "norms": {
+                    "type": "string",
+                    "description": "male | female | pooled | <norm_set_id>. Defaults from the registrant's gender. Pooled/versioned sets arrive with the norm-analytics phase."
+                  },
+                  "access_code": {
+                    "type": "string",
+                    "description": "Falls back to the API key's default code. Requested scopes must be within the code's allowance (docs/07)."
+                  },
+                  "audit": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Capture the explainability trace, retrievable at /v2/assessments/{id}/results/audit."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access-code problem (unknown, unusable, or scopes outside its allowance)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing tools per scope, unknown scope, or norm-set problem",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/score": {
+      "post": {
+        "summary": "One-shot: registration + tools + scoring in a single call",
+        "operationId": "scoreOneShot",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "registration",
+                  "tools"
+                ],
+                "properties": {
+                  "registration": {
+                    "type": "object",
+                    "required": [
+                      "firstname",
+                      "lastname",
+                      "email",
+                      "language"
+                    ],
+                    "properties": {
+                      "firstname": {
+                        "type": "string"
+                      },
+                      "middlename": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastname": {
+                        "type": "string"
+                      },
+                      "email": {
+                        "type": "string",
+                        "format": "email"
+                      },
+                      "language": {
+                        "type": "string",
+                        "enum": [
+                          "en",
+                          "fr",
+                          "pt"
+                        ]
+                      },
+                      "gender": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "M",
+                          "F",
+                          null
+                        ],
+                        "description": "Required for scopes touching the S/P dimensions unless an explicit `norms` value is passed when scoring (gender-split norms, docs 04/06)."
+                      },
+                      "dob": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "format": "date",
+                        "description": "Never used in scoring."
+                      },
+                      "external_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Client correlation key, echoed everywhere."
+                      }
+                    }
+                  },
+                  "tools": {
+                    "type": "object",
+                    "description": "Map of tool name to responses ({q: a} map or [{q, a}] list).",
+                    "additionalProperties": true
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "mcs.m",
+                        "mcs.c",
+                        "mcs.s",
+                        "mcs",
+                        "pro.person",
+                        "pro.role",
+                        "pro.org",
+                        "insights",
+                        "reflections",
+                        "full"
+                      ]
+                    },
+                    "default": [
+                      "full"
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "keys",
+                      "strings"
+                    ],
+                    "default": "keys"
+                  },
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "en",
+                      "fr",
+                      "pt"
+                    ],
+                    "description": "Content language for strings format; defaults to the registration language."
+                  },
+                  "norms": {
+                    "type": "string",
+                    "description": "male | female | pooled | <norm_set_id>. Defaults from the registrant's gender. Pooled/versioned sets arrive with the norm-analytics phase."
+                  },
+                  "access_code": {
+                    "type": "string",
+                    "description": "Falls back to the API key's default code. Requested scopes must be within the code's allowance (docs/07)."
+                  },
+                  "audit": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Capture the explainability trace, retrievable at /v2/assessments/{id}/results/audit."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created and scored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access-code problem",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation or scope problem",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/assessments/{id}": {
+      "get": {
+        "summary": "Status: tools received, per-scope readiness, results available",
+        "operationId": "getAssessment",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AssessmentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/assessments/{id}/results": {
+      "get": {
+        "summary": "Re-render the latest result (any scope subset, format, language, any time)",
+        "operationId": "getResults",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AssessmentId"
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated subset of the scored scopes."
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "keys",
+                "strings"
+              ],
+              "default": "keys"
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "fr",
+                "pt"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not scored yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/assessments/{id}/results/audit": {
+      "get": {
+        "summary": "Explainability trace: rules fired, stage values, content keys (score with audit:true)",
+        "operationId": "getAudit",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AssessmentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit trace"
+          },
+          "404": {
+            "description": "Not scored, or scored without audit:true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/reference/languages": {
+      "get": {
+        "summary": "Supported languages, content coverage, norm status",
+        "operationId": "referenceLanguages",
+        "responses": {
+          "200": {
+            "description": "Languages"
+          }
+        }
+      }
+    },
+    "/v2/reference/questions": {
+      "get": {
+        "summary": "Questionnaire content per tool/language (render without hardcoding)",
+        "operationId": "referenceQuestions",
+        "parameters": [
+          {
+            "name": "tool",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "reflections",
+                "personalmotivators",
+                "areamissions",
+                "abilitiesfilter",
+                "personalstyle",
+                "personalexpectations",
+                "person",
+                "role",
+                "organization"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "fr",
+                "pt"
+              ],
+              "default": "en"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Questions with validation specs"
+          }
+        }
+      }
+    },
+    "/v2/reference/translations": {
+      "get": {
+        "summary": "English-keyed key→string maps for keys-mode clients",
+        "operationId": "referenceTranslations",
+        "parameters": [
+          {
+            "name": "language",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "fr",
+                "pt"
+              ],
+              "default": "en"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "archetype_details, insight_details, lookup_definitions maps"
+          }
+        }
+      }
+    },
+    "/v2/reference/scopes": {
+      "get": {
+        "summary": "Scope catalog: required tools, norm behavior, output shape",
+        "operationId": "referenceScopes",
+        "responses": {
+          "200": {
+            "description": "Scopes"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key issued out of band; hashed at rest."
+      }
+    },
+    "parameters": {
+      "AssessmentId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Assessment public id (ULID)."
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Same key + same payload replays the stored response; same key + different payload is a 409."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "ResultEnvelope": {
+        "type": "object",
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scored_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "language": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "keys",
+              "strings"
+            ]
+          },
+          "norms": {
+            "type": "object",
+            "properties": {
+              "set_id": {
+                "type": "string",
+                "description": "Recorded forever on the result; 'none' when no requested scope uses norms."
+              },
+              "provisional": {
+                "type": "boolean"
+              }
+            }
+          },
+          "scopes": {
+            "type": "object",
+            "description": "One entry per requested scope (docs 03 output catalog for shapes)."
+          }
+        }
+      },
+      "AssessmentStatus": {
+        "type": "object",
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "language": {
+            "type": "string"
+          },
+          "gender": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tools": {
+            "type": "object",
+            "description": "tool → {received, valid, submitted_at}"
+          },
+          "scopes_ready": {
+            "type": "object",
+            "description": "scope → bool (all required tools submitted)"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "scored": {
+      "post": {
+        "summary": "Sent to the API key's webhook_url after each successful scoring call",
+        "description": "HMAC-SHA256 of the raw body in X-Signature (key's webhook secret); event name in X-Event. Retries with backoff on non-2xx.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ResultEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "event": {
+                        "type": "string",
+                        "const": "scored"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges delivery"
+          }
+        }
+      }
+    }
+  }
+}
