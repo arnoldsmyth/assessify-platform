@@ -117,6 +117,14 @@ workers:
         value: ${valkey.DATABASE_URL}
       - key: SENDGRID_API_KEY
         type: SECRET
+      - key: MAIL_FROM_NAME
+        value: Assessify
+      - key: MAIL_FROM_ADDRESS
+        value: no-reply@assessify.ie
+      - key: PRODUCT_SLUG_BASE_DOMAINS
+        value: staging.assessify.ie
+      - key: ERROR_ALERT_EMAILS
+        type: SECRET
       - key: PDF_SERVICE_URL
         value: http://pdf-service:8080
       - key: PDF_SERVICE_SHARED_SECRET
