@@ -51,6 +51,13 @@ export interface ProviderEventOutcome {
     id: string;
     kind: NotificationKind;
     status: NotificationStatus;
+    /**
+     * Traceability refs from the log row, so the webhook controller can hand
+     * order-affecting events on (spec 13: invitation hard bounce → order
+     * `email_error` via the invitation service).
+     */
+    orderId: string | null;
+    sessionId: string | null;
   };
 }
 
@@ -272,12 +279,13 @@ export function createNotificationService(deps: NotificationServiceDeps): Notifi
         return ok({ matched: false, changed: false });
       }
 
+      const refs = { orderId: entry.orderId, sessionId: entry.sessionId };
       const nextStatus = EVENT_STATUS[event.type];
       if (!nextStatus || STATUS_RANK[nextStatus] <= STATUS_RANK[entry.status]) {
         return ok({
           matched: true,
           changed: false,
-          notification: { id: entry.id, kind: entry.kind, status: entry.status },
+          notification: { id: entry.id, kind: entry.kind, status: entry.status, ...refs },
         });
       }
 
@@ -290,6 +298,7 @@ export function createNotificationService(deps: NotificationServiceDeps): Notifi
             id: entry.id,
             kind: entry.kind,
             status: updated?.status ?? entry.status,
+            ...refs,
           },
         });
       } catch (cause) {

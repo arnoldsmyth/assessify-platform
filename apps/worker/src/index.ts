@@ -18,7 +18,7 @@
  */
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { getHealth, getNotificationService } from '@assessify/services';
+import { getHealth, getInvitationService, getNotificationService } from '@assessify/services';
 import type { Mailer } from '@assessify/adapters';
 import {
   ASSESSIFY_QUEUE_NAME,
@@ -57,12 +57,27 @@ async function main(): Promise<void> {
     ? getNotificationService({ mailer, queue: jobQueue })
     : undefined;
   if (!env.databaseUrl) {
-    console.log('[worker] DATABASE_URL not set — notifications.send jobs will fail');
+    console.log(
+      '[worker] DATABASE_URL not set — notifications.send/invitations.dispatch jobs will fail'
+    );
   }
+  // Invitation dispatch (D5): links are built on the primary slug base
+  // domain; the platform sender backs products without branding.emailFrom.
+  const invitations = env.databaseUrl
+    ? getInvitationService(
+        { queue: jobQueue },
+        {
+          slugBaseDomain: env.slugBaseDomains[0] ?? 'assessify.ie',
+          platformSender: env.mailFrom,
+          ...(env.errorAlertEmails !== undefined && { alertRecipients: env.errorAlertEmails }),
+        }
+      )
+    : undefined;
 
   const registry = createProcessorRegistry({
     health: { getHealth },
     notifications: { service: notifications },
+    invitations: { service: invitations },
   });
   const worker = new Worker(ASSESSIFY_QUEUE_NAME, (job) => dispatchJob(registry, job), {
     connection,

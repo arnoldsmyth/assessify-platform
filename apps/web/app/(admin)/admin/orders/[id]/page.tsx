@@ -20,6 +20,8 @@ import { transitionOrderAction } from '../actions';
 import { formatMinor } from '../_lib/form';
 import { OrderStatusBadge, SessionStatusBadge } from '../_components/status-badge';
 import { TransitionPanel, type TransitionButton } from '../_components/transition-panel';
+import { dispatchInvitationsAction, resendInvitationAction } from './invitation-actions';
+import { DispatchInvitationsPanel, ResendInvitationButton } from './invitation-controls';
 
 // Reads live data on every request — never prerendered at build time.
 export const dynamic = 'force-dynamic';
@@ -101,6 +103,14 @@ export default async function OrderDetailPage({
     : `${order.productId.slice(0, 8)}…`;
 
   const transitionAction = transitionOrderAction.bind(null, order.id);
+  const dispatchAction = dispatchInvitationsAction.bind(null, order.id);
+  const resendAction = resendInvitationAction.bind(null, order.id);
+  // D5 affordances: dispatch while approved; per-session resend once
+  // invitations exist (spec 05: same token, regenerated PIN).
+  const canDispatchInvitations = order.status === 'approved';
+  const canResendInvitations =
+    !order.suppressNotifications &&
+    (order.status === 'approved' || order.status === 'sent' || order.status === 'email_error');
 
   return (
     <div className="flex flex-col gap-6">
@@ -145,6 +155,7 @@ export default async function OrderDetailPage({
                       <th className="px-4 py-2">Session</th>
                       <th className="px-4 py-2">Invited</th>
                       <th className="px-4 py-2">Completed</th>
+                      {canResendInvitations ? <th className="px-4 py-2">Invitation</th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -173,6 +184,18 @@ export default async function OrderDetailPage({
                             ? session.completedAt.toISOString().slice(0, 10)
                             : '—'}
                         </td>
+                        {canResendInvitations ? (
+                          <td className="px-4 py-2">
+                            {session.status === 'invited' || session.status === 'started' ? (
+                              <ResendInvitationButton
+                                action={resendAction}
+                                sessionId={session.id}
+                              />
+                            ) : (
+                              <span className="text-muted">—</span>
+                            )}
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
                   </tbody>
@@ -251,7 +274,12 @@ export default async function OrderDetailPage({
             <CardHeader>
               <CardTitle className="text-base">Actions</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-4">
+              {canDispatchInvitations ? (
+                // Suppressed (silent-mode) orders still dispatch — sessions are
+                // marked invited without email; the partner delivers access.
+                <DispatchInvitationsPanel action={dispatchAction} />
+              ) : null}
               <TransitionPanel
                 events={manualEventButtons(order.status)}
                 action={transitionAction}

@@ -22,6 +22,13 @@ export interface CustomDomainRepository {
    * are indistinguishable from unknown hosts on the serving path.
    */
   findActiveByHostname(hostname: string): Promise<ActiveCustomDomain | null>;
+  /**
+   * Reverse lookup for outbound links (D5 invitation emails): every active
+   * domain serving a product, ordered by hostname for determinism. The
+   * invitation service prefers a client-specific domain matching the order's
+   * client, then a product-generic one, else falls back to the slug host.
+   */
+  findActiveByProductId(productId: string): Promise<ActiveCustomDomain[]>;
 }
 
 export function createCustomDomainRepository(db: Database): CustomDomainRepository {
@@ -38,6 +45,18 @@ export function createCustomDomainRepository(db: Database): CustomDomainReposito
         .limit(1);
       const row = rows[0];
       return row ?? null;
+    },
+
+    async findActiveByProductId(productId) {
+      return db
+        .select({
+          hostname: customDomains.hostname,
+          productId: customDomains.productId,
+          clientId: customDomains.clientId,
+        })
+        .from(customDomains)
+        .where(and(eq(customDomains.productId, productId), eq(customDomains.status, 'active')))
+        .orderBy(customDomains.hostname);
     },
   };
 }

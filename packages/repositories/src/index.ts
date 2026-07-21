@@ -62,6 +62,11 @@ export {
   type RespondentSessionRepository,
 } from './postgres/respondent-sessions';
 export {
+  createInvitationSessionRepository,
+  type InvitationSessionRecord,
+  type InvitationSessionRepository,
+} from './postgres/invitation-sessions';
+export {
   createInMemoryPinAttemptStore,
   type PinAttemptState,
   type PinAttemptStore,

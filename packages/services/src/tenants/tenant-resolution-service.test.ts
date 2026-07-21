@@ -60,6 +60,9 @@ function repos(fixtures: Fixtures) {
       async (hostname: string) =>
         (fixtures.domains ?? []).find((d) => d.hostname === hostname) ?? null
     ),
+    findActiveByProductId: vi.fn(async (productId: string) =>
+      (fixtures.domains ?? []).filter((d) => d.productId === productId)
+    ),
   };
   return { products, customDomains };
 }

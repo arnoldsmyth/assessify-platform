@@ -10,6 +10,7 @@
 import type { JobName, JobPayload } from '@assessify/domain';
 import { createHealthPingProcessor, type HealthPingDeps } from './health-ping';
 import { createHeartbeatProcessor } from './heartbeat';
+import { createInvitationsDispatchProcessor, type InvitationsDeps } from './invitations';
 import { createNotificationSendProcessor, type NotificationsDeps } from './notifications';
 
 export type ProcessorRegistry = {
@@ -19,6 +20,7 @@ export type ProcessorRegistry = {
 export interface ProcessorDeps {
   health: HealthPingDeps;
   notifications: NotificationsDeps;
+  invitations: InvitationsDeps;
 }
 
 export function createProcessorRegistry(deps: ProcessorDeps): ProcessorRegistry {
@@ -26,5 +28,6 @@ export function createProcessorRegistry(deps: ProcessorDeps): ProcessorRegistry 
     'health.ping': createHealthPingProcessor(deps.health),
     'maintenance.heartbeat': createHeartbeatProcessor(),
     'notifications.send': createNotificationSendProcessor(deps.notifications),
+    'invitations.dispatch': createInvitationsDispatchProcessor(deps.invitations),
   };
 }
