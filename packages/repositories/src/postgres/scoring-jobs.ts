@@ -22,6 +22,16 @@ export interface ScoringJobCreate {
   createdAt?: Date;
 }
 
+/**
+ * Engine-side identifier for a dispatched job (E2): e.g. the Pro-Logic
+ * `assessment_id`. Stored inside `request_payload.externalRef` (no schema
+ * change) so the provider's `scored` webhook can resolve the job.
+ */
+export interface ScoringJobExternalRef {
+  provider: string;
+  assessmentId: string;
+}
+
 export interface ScoringJobRepository {
   /** Insert a fresh job (status `queued`, attempts 0). */
   insert(input: ScoringJobCreate): Promise<ScoringJob>;
@@ -57,6 +67,17 @@ export interface ScoringJobRepository {
    * per-product SLA sweep), oldest first.
    */
   listStuck(olderThan: Date, limit?: number): Promise<ScoringJob[]>;
+  /**
+   * Merge the engine-side reference into `request_payload.externalRef`
+   * (E2). Not a status transition — any live status keeps it; null when the
+   * job is unknown or already terminal-failed.
+   */
+  setExternalRef(id: string, ref: ScoringJobExternalRef): Promise<ScoringJob | null>;
+  /**
+   * Resolve the job a provider webhook refers to, newest first (re-scoring
+   * creates new rows; the newest one owns the engine's latest result).
+   */
+  findByExternalRef(provider: string, assessmentId: string): Promise<ScoringJob | null>;
 }
 
 type ScoringJobRow = typeof scoringJobs.$inferSelect;
@@ -186,6 +207,32 @@ export function createScoringJobRepository(db: Database): ScoringJobRepository {
         dispatchedAt: null,
         callbackTokenHash: null,
       });
+    },
+
+    setExternalRef(id, ref) {
+      // jsonb merge keeps the dispatched snapshot intact; CAS on the live
+      // statuses so a parked/failed row is not silently revived by a late
+      // adapter write.
+      return casUpdate(id, ['queued', 'dispatched', 'awaiting_callback', 'completed'], {
+        requestPayload: sql`coalesce(${scoringJobs.requestPayload}, '{}'::jsonb) || ${JSON.stringify(
+          { externalRef: { provider: ref.provider, assessmentId: ref.assessmentId } }
+        )}::jsonb`,
+      });
+    },
+
+    async findByExternalRef(provider, assessmentId) {
+      const rows = await db
+        .select()
+        .from(scoringJobs)
+        .where(
+          sql`${scoringJobs.requestPayload} @> ${JSON.stringify({
+            externalRef: { provider, assessmentId },
+          })}::jsonb`
+        )
+        .orderBy(desc(scoringJobs.createdAt), desc(scoringJobs.id))
+        .limit(1);
+      const row = rows[0];
+      return row ? toEntity(row) : null;
     },
 
     async listStuck(olderThan, limit = 100) {

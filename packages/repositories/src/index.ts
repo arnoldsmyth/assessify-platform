@@ -79,8 +79,14 @@ export {
 export {
   createScoringJobRepository,
   type ScoringJobCreate,
+  type ScoringJobExternalRef,
   type ScoringJobRepository,
 } from './postgres/scoring-jobs';
+export {
+  createRespondentRepository,
+  type RespondentIdentity,
+  type RespondentRepository,
+} from './postgres/respondents';
 export {
   createInvitationSessionRepository,
   type InvitationSessionRecord,

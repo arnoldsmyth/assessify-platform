@@ -32,6 +32,78 @@ export const scoringRetrievalModeSchema = z.enum(scoringRetrievalModes);
 export type ScoringRetrievalMode = z.infer<typeof scoringRetrievalModeSchema>;
 
 // ---------------------------------------------------------------------------
+// External providers — Pro-Logic (E2, docs/pro-logic-openapi.json)
+// ---------------------------------------------------------------------------
+
+/**
+ * Known `async_external` scoring providers. A provider key on the product's
+ * scoring config selects the concrete adapter at the composition root and
+ * tells the scoring service the engine's documented payload contract requires
+ * respondent identity (the spec 00 PII exception — see the adapter docs).
+ */
+export const externalScoringProviders = ['prologic'] as const;
+export const externalScoringProviderSchema = z.enum(externalScoringProviders);
+export type ExternalScoringProvider = z.infer<typeof externalScoringProviderSchema>;
+
+/** Pro-Logic tool identifiers (OpenAPI `tool` path enum — do not reorder). */
+export const prologicTools = [
+  'reflections',
+  'personalmotivators',
+  'areamissions',
+  'abilitiesfilter',
+  'personalstyle',
+  'personalexpectations',
+  'person',
+  'role',
+  'organization',
+] as const;
+export const prologicToolSchema = z.enum(prologicTools);
+export type PrologicTool = z.infer<typeof prologicToolSchema>;
+
+/** Pro-Logic scoring scopes (OpenAPI `scopes[]` enum). */
+export const prologicScopes = [
+  'mcs.m',
+  'mcs.c',
+  'mcs.s',
+  'mcs',
+  'pro.person',
+  'pro.role',
+  'pro.org',
+  'insights',
+  'reflections',
+  'full',
+] as const;
+export const prologicScopeSchema = z.enum(prologicScopes);
+export type PrologicScope = z.infer<typeof prologicScopeSchema>;
+
+/**
+ * Maps our questionnaire question KEYS onto Pro-Logic (tool, q) coordinates:
+ * `{ [tool]: { [questionKey]: q } }` with q 1-BASED per the Pro-Logic
+ * contract. Grouping by tool mirrors submission (one PUT per tool) and makes
+ * scope→required-tool gating a key lookup. Each q must be unique within its
+ * tool — two question keys cannot land on the same Pro-Logic question.
+ */
+export const prologicToolMapSchema = z
+  .record(prologicToolSchema, z.record(z.string().min(1), z.number().int().min(1)))
+  .superRefine((toolMap, ctx) => {
+    for (const [tool, questions] of Object.entries(toolMap)) {
+      const seen = new Map<number, string>();
+      for (const [questionKey, q] of Object.entries(questions ?? {})) {
+        const existing = seen.get(q);
+        if (existing !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [tool, questionKey],
+            message: `q ${q} is already mapped by "${existing}" for tool "${tool}"`,
+          });
+        }
+        seen.set(q, questionKey);
+      }
+    }
+  });
+export type PrologicToolMap = z.infer<typeof prologicToolMapSchema>;
+
+// ---------------------------------------------------------------------------
 // ScoreSet — the normalized score document (spec 08)
 // ---------------------------------------------------------------------------
 

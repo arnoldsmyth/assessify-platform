@@ -204,4 +204,44 @@ describe('createScoringJobRepository', () => {
     const jobs = await repo.listStuck(new Date());
     expect(jobs[0]?.status).toBe('awaiting_callback');
   });
+
+  it('setExternalRef merges into request_payload via SQL (never replaces the snapshot)', async () => {
+    const ref = { provider: 'prologic', assessmentId: 'A-1' };
+    const row = makeRow({
+      status: 'dispatched',
+      dispatchedAt: now,
+      attempts: 1,
+      requestPayload: { answers: { q1: 3 }, externalRef: ref },
+    });
+    const { db, calls } = makeDbDouble({ updateRows: [row] });
+    const repo = createScoringJobRepository(db);
+    const job = await repo.setExternalRef(row.id as string, ref);
+    expect(job?.requestPayload).toEqual({ answers: { q1: 3 }, externalRef: ref });
+    // The payload write is a jsonb || merge expression (drizzle SQL object
+    // with queryChunks), not a literal record that would clobber the snapshot.
+    const written = calls.updateSet?.['requestPayload'] as Record<string, unknown>;
+    expect(written).toBeDefined();
+    expect(written).toHaveProperty('queryChunks');
+
+    const { db: missDb } = makeDbDouble({ updateRows: [] });
+    await expect(createScoringJobRepository(missDb).setExternalRef(uuidv7(), ref)).resolves.toBeNull();
+  });
+
+  it('findByExternalRef maps the newest matching row and nulls on no match', async () => {
+    const row = makeRow({
+      status: 'dispatched',
+      dispatchedAt: now,
+      attempts: 1,
+      requestPayload: { externalRef: { provider: 'prologic', assessmentId: 'A-1' } },
+    });
+    const { db } = makeDbDouble({ selectRows: [row] });
+    const repo = createScoringJobRepository(db);
+    const job = await repo.findByExternalRef('prologic', 'A-1');
+    expect(job?.id).toBe(row.id);
+
+    const { db: emptyDb } = makeDbDouble({ selectRows: [] });
+    await expect(
+      createScoringJobRepository(emptyDb).findByExternalRef('prologic', 'A-404')
+    ).resolves.toBeNull();
+  });
 });

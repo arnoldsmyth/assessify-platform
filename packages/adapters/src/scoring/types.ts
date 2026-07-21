@@ -56,6 +56,39 @@ export interface ScoringCallbackRef {
   token: string;
 }
 
+/**
+ * Respondent identity for engines whose DOCUMENTED payload contract requires
+ * it (spec 00 PII exception — e.g. Pro-Logic registration needs
+ * name/email/language). Populated by the scoring service only when the
+ * product's scoring config names an external `provider`; NEVER logged, never
+ * snapshotted onto `scoring_jobs.request_payload`.
+ *
+ * `id` is `respondents.id` — the STABLE per-person identifier reused across
+ * orders and rescores. Pro-Logic bills a royalty per external_id on
+ * royalty-bearing products (owner, 2026-07-21), so passing anything
+ * session- or order-scoped here is a billing bug.
+ */
+export interface ScoringRespondentIdentity {
+  /** `respondents.id` — the external correlation/royalty anchor. */
+  id: string;
+  firstname: string;
+  middlename?: string;
+  lastname: string;
+  email: string;
+  /** We store no gender; present only if a future source provides it. */
+  gender?: 'M' | 'F';
+}
+
+/**
+ * Engine-side identifier for a dispatched scoring request (e.g. the
+ * Pro-Logic `assessment_id`). Persisted on the job (request_payload) so the
+ * provider's `scored` webhook can be correlated back to the job.
+ */
+export interface ScoringExternalRef {
+  provider: string;
+  assessmentId: string;
+}
+
 export interface ScoringInput {
   jobId: string;
   sessionId: string;
@@ -68,6 +101,8 @@ export interface ScoringInput {
   answers: ScoringAnswers;
   /** Only fields the engine contract requires, documented per product. */
   respondentMeta?: { language: string; gender?: string };
+  /** Set only when `config.provider` demands identity (payload-contract PII exception). */
+  respondent?: ScoringRespondentIdentity;
   callback?: ScoringCallbackRef;
   /** The product's `scoring_config` (engine key, endpoint, timeouts, ...). */
   config: ScoringConfig;
@@ -79,11 +114,16 @@ export interface ScoringInput {
 
 export type ScoringOutcome =
   /** Scores computed inline (sync_internal, or an external engine answering synchronously). */
-  | { kind: 'sync_result'; scores: ScoreSet }
+  | { kind: 'sync_result'; scores: ScoreSet; externalRef?: ScoringExternalRef }
   /** Engine accepted the request; results arrive later via `retrieval`. */
-  | { kind: 'accepted_async'; retrieval: ScoringRetrievalMode }
-  /** Engine rejected/failed. `retryable: false` parks the job immediately. */
-  | { kind: 'failed'; retryable: boolean; error: string };
+  | { kind: 'accepted_async'; retrieval: ScoringRetrievalMode; externalRef?: ScoringExternalRef }
+  /**
+   * Engine rejected/failed. `retryable: false` parks the job immediately.
+   * `externalRef` is still set when the engine registered the request before
+   * failing (e.g. Pro-Logic scored server-side but our read timed out) so a
+   * later `scored` webhook can still find the job.
+   */
+  | { kind: 'failed'; retryable: boolean; error: string; externalRef?: ScoringExternalRef };
 
 /** Pull-retrieval request: everything needed to locate the result remotely. */
 export interface ScoringFetchInput {

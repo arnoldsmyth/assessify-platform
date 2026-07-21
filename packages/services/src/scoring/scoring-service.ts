@@ -18,12 +18,15 @@ import {
 import type {
   JobQueue,
   ScoringAdapter,
+  ScoringExternalRef,
   ScoringInput,
   ScoringOutcome,
+  ScoringRespondentIdentity,
 } from '@assessify/adapters';
 import type {
   ProductRepository,
   QuestionnaireVersionRepository,
+  RespondentRepository,
   RespondentSessionRepository,
   ResponseRepository,
   ScoringJobRepository,
@@ -91,6 +94,18 @@ export interface ScoringService extends ScoringDispatcher {
    */
   applyScores(jobId: string, scores: unknown): Promise<Result<ScoringApplyReceipt>>;
   /**
+   * Webhook seam (E2): resolve the job a provider's engine-side reference
+   * points at (`request_payload.externalRef`, written during processJob) and
+   * apply the scores through the same idempotent applyScores path. An
+   * unknown ref returns `scoring/external_ref_unknown` — the webhook route
+   * answers non-2xx so the provider redelivers (covers the race where the
+   * webhook beats our own persistence of the ref).
+   */
+  applyExternalScores(
+    ref: ScoringExternalRef,
+    scores: unknown
+  ): Promise<Result<ScoringApplyReceipt>>;
+  /**
    * Admin retry (D7, super_admin only): failed → queued, order
    * `retry_scoring` (scoring_error → processing_report), job re-enqueued.
    */
@@ -109,6 +124,12 @@ export interface ScoringServiceDeps {
   responses: Pick<ResponseRepository, 'findBySessionId'>;
   versions: Pick<QuestionnaireVersionRepository, 'findById'>;
   products: Pick<ProductRepository, 'findById'>;
+  /**
+   * Respondent identity source — required only for products whose scoring
+   * config names an external `provider` whose payload contract demands
+   * identity (the spec 00 PII exception, e.g. Pro-Logic registration).
+   */
+  respondents?: Pick<RespondentRepository, 'findById'>;
   orderService: Pick<OrderService, 'transition'>;
   audit: AuditService;
   /** Required for dispatch/retry; processJob never enqueues. */
@@ -428,6 +449,32 @@ export function createScoringService(deps: ScoringServiceDeps): ScoringService {
         return failPermanently(job, session.orderId, `adapter_unavailable:${config.mode}`);
       }
 
+      // External providers with a documented identity contract (spec 00 PII
+      // exception): load the respondent so the adapter can register them.
+      // `respondents.id` doubles as the engine's external_id — the STABLE
+      // per-person royalty anchor (owner rule 2026-07-21), which is why the
+      // id comes from the respondents row and never from session/order ids.
+      let respondentIdentity: ScoringRespondentIdentity | undefined;
+      if (config.provider !== undefined) {
+        if (!session.respondentId) {
+          return failPermanently(job, session.orderId, 'respondent_identity_missing:session');
+        }
+        if (!deps.respondents) {
+          return failPermanently(job, session.orderId, 'respondent_repository_unavailable');
+        }
+        const respondent = await deps.respondents.findById(session.respondentId);
+        if (!respondent || !respondent.email || !respondent.firstName || !respondent.lastName) {
+          // Field NAMES only in the error — never identity values.
+          return failPermanently(job, session.orderId, 'respondent_identity_missing:fields');
+        }
+        respondentIdentity = {
+          id: respondent.id,
+          firstname: respondent.firstName,
+          lastname: respondent.lastName,
+          email: respondent.email,
+        };
+      }
+
       const input: ScoringInput = {
         jobId: job.id,
         sessionId: job.sessionId,
@@ -439,6 +486,9 @@ export function createScoringService(deps: ScoringServiceDeps): ScoringService {
         },
         answers: buildScoringAnswers(response.answers),
         ...(session.language ? { respondentMeta: { language: session.language } } : {}),
+        // Identity rides only on the in-memory input for the adapter call —
+        // it is NEVER part of the request_payload snapshot below.
+        ...(respondentIdentity ? { respondent: respondentIdentity } : {}),
         // callback url/token pair is minted by E2's async wiring; pull
         // retrieval and sync engines never receive one.
         config,
@@ -467,6 +517,13 @@ export function createScoringService(deps: ScoringServiceDeps): ScoringService {
           retryable: true,
           error: cause instanceof Error ? cause.message : String(cause),
         };
+      }
+
+      // Persist the engine-side reference BEFORE branching so the provider's
+      // `scored` webhook can find this job even when our read of the score
+      // response failed (redundant-confirmation path, E2).
+      if (outcome.externalRef !== undefined) {
+        await scoringJobs.setExternalRef(job.id, outcome.externalRef);
       }
 
       if (outcome.kind === 'sync_result') {
@@ -515,6 +572,20 @@ export function createScoringService(deps: ScoringServiceDeps): ScoringService {
 
     applyScores(jobId, scores) {
       return applyScoresById(jobId, scores);
+    },
+
+    async applyExternalScores(ref, scores) {
+      const job = await scoringJobs.findByExternalRef(ref.provider, ref.assessmentId);
+      if (!job) {
+        // Deliberately NOT permanent: the webhook may have out-raced our own
+        // persistence of the ref — a non-2xx reply makes the provider retry.
+        return err({
+          code: 'scoring/external_ref_unknown',
+          message: 'No scoring job matches this engine reference',
+          detail: { provider: ref.provider, assessmentId: ref.assessmentId },
+        });
+      }
+      return applyScoresById(job.id, scores);
     },
 
     async retry(caller, jobId) {

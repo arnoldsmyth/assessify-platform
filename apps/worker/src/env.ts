@@ -46,6 +46,17 @@ const envSchema = z
     MAIL_FROM_NAME: z.string().min(1).default('Assessify'),
     MAIL_FROM_ADDRESS: z.string().email().default('no-reply@assessify.local'),
     /**
+     * Pro-Logic scoring engine base URL (E2). Defaults to production; point
+     * it at a sandbox for staging.
+     */
+    PROLOGIC_API_URL: z.string().url().default('https://pro-logic.arntek.com'),
+    /**
+     * Pro-Logic API key (Bearer). Optional: when unset, `async_external` +
+     * provider `prologic` scoring jobs fail RETRYABLY with a clear message
+     * (they recover once the key is configured and the job retries).
+     */
+    PROLOGIC_API_KEY: z.string().min(1).optional(),
+    /**
      * Comma-separated super-admin addresses for `error_alert` mail (spec 06
      * error states). Optional: unset skips alert emails (audit still records).
      */
@@ -74,6 +85,8 @@ export interface WorkerEnv {
   slugBaseDomains: string[];
   mailFrom: { name: string; address: string };
   errorAlertEmails?: string[];
+  prologicApiUrl: string;
+  prologicApiKey?: string;
 }
 
 export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEnv {
@@ -103,6 +116,10 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     },
     ...(parsed.data.ERROR_ALERT_EMAILS !== undefined && {
       errorAlertEmails: parsed.data.ERROR_ALERT_EMAILS,
+    }),
+    prologicApiUrl: parsed.data.PROLOGIC_API_URL,
+    ...(parsed.data.PROLOGIC_API_KEY !== undefined && {
+      prologicApiKey: parsed.data.PROLOGIC_API_KEY,
     }),
   };
 }
