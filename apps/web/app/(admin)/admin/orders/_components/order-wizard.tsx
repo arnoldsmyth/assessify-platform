@@ -1,8 +1,20 @@
 'use client';
 
-import { useActionState, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  useActionState,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 
+import {
+  orderableCurrencies,
+  resolveOrderUnitPrice,
+  type OrderPricingSource,
+} from '@assessify/domain';
 import {
   Button,
   Card,
@@ -20,39 +32,48 @@ import {
   parseRespondentsCsv,
   type OrderFormState,
   type RespondentRow,
+  type WizardClient,
+  type WizardProduct,
 } from '../_lib/form';
 
 /**
  * Multi-step order wizard (spec 06 "Admin/client wizard"): client → product →
- * respondents → pricing → review. Client-side state is convenience only —
- * the server action re-parses and the order service's Zod schema is the
- * authority. Payment + submit (draft → pending) happen on the order detail
- * page after creation (payment step lands with D3).
+ * respondents → pricing → review. Products are loaded per selected client
+ * (M3: only same-organization products the client has access to), and the
+ * pricing step resolves the unit price from the org price list by (report
+ * language, currency) — super admins may override it, everyone else is held
+ * to the resolved price. Client-side state is convenience only — the server
+ * action re-parses and the order service is the authority. Payment + submit
+ * (draft → pending) happen on the order detail page after creation.
  */
 
-export interface WizardClient {
-  id: string;
-  name: string;
-  clientNumber: number;
-  defaultCurrency: string;
-}
-
-export interface WizardProduct {
-  id: string;
-  name: string;
-  defaultLanguage: string;
-  availableLanguages: string[];
-  retailPrice: number | null;
-  retailCurrency: string | null;
-  /** Active 'self' questionnaire version — orders pin it at creation. */
-  activeSelfVersion: { id: string; version: number } | null;
-}
+export type { WizardClient, WizardProduct };
 
 interface OrderWizardProps {
   clients: WizardClient[];
-  products: WizardProduct[];
   isSuperAdmin: boolean;
   action: (state: OrderFormState, formData: FormData) => Promise<OrderFormState>;
+  /** Server action: products the given client may order (empty on denial). */
+  loadProducts: (clientId: string) => Promise<WizardProduct[]>;
+}
+
+function pricingSource(product: WizardProduct): OrderPricingSource {
+  return {
+    prices: product.prices,
+    retailPrice: product.retailPrice,
+    retailCurrency: product.retailCurrency,
+  };
+}
+
+/** Preferred currency for a product/language: the client's default if priced, else the first priced option. */
+function pickCurrency(
+  product: WizardProduct,
+  language: string,
+  preferred: string | undefined
+): string {
+  const options = orderableCurrencies(pricingSource(product), language);
+  if (preferred && options.includes(preferred)) return preferred;
+  return options[0] ?? preferred ?? 'EUR';
 }
 
 const STEPS = ['Client', 'Product', 'Respondents', 'Pricing', 'Review'] as const;
@@ -63,11 +84,13 @@ function rowComplete(row: RespondentRow): boolean {
   return row.firstName.trim() !== '' && row.lastName.trim() !== '' && row.email.trim() !== '';
 }
 
-export function OrderWizard({ clients, products, isSuperAdmin, action }: OrderWizardProps) {
+export function OrderWizard({ clients, isSuperAdmin, action, loadProducts }: OrderWizardProps) {
   const [state, formAction, pending] = useActionState(action, { status: 'idle' });
   const [step, setStep] = useState(0);
 
   const [clientId, setClientId] = useState(clients.length === 1 ? (clients[0]?.id ?? '') : '');
+  const [products, setProducts] = useState<WizardProduct[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
   const [productId, setProductId] = useState('');
   const [orderType, setOrderType] = useState<'named' | 'bulk_named'>('named');
   const [reportLanguage, setReportLanguage] = useState('en');
@@ -81,6 +104,30 @@ export function OrderWizard({ clients, products, isSuperAdmin, action }: OrderWi
 
   const client = clients.find((c) => c.id === clientId);
   const product = products.find((p) => p.id === productId);
+
+  // The catalogue depends on the selected client (M3: same organization +
+  // access). Re-fetch on every client change; ignore stale responses.
+  useEffect(() => {
+    if (clientId === '') {
+      setProducts([]);
+      return;
+    }
+    let cancelled = false;
+    setProductsLoading(true);
+    loadProducts(clientId)
+      .then((list) => {
+        if (!cancelled) setProducts(list);
+      })
+      .catch(() => {
+        if (!cancelled) setProducts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProductsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, loadProducts]);
 
   const csvPreview = useMemo(
     () => (entryMode === 'csv' && csvText.trim() !== '' ? parseRespondentsCsv(csvText) : null),
@@ -97,13 +144,50 @@ export function OrderWizard({ clients, products, isSuperAdmin, action }: OrderWi
 
   const description = product ? `${product.name} assessment` : 'Assessment';
 
+  // Resolved price for the current (product, report language, currency) —
+  // mirrors the order service's enforcement (price list → retail fallback).
+  const resolvedPrice = product
+    ? resolveOrderUnitPrice(pricingSource(product), reportLanguage, currency)
+    : null;
+  const currencyOptions = product
+    ? orderableCurrencies(pricingSource(product), reportLanguage)
+    : [];
+  const priceLocked = !isSuperAdmin;
+
+  function applyResolvedPrice(target: WizardProduct, language: string, nextCurrency: string) {
+    const resolved = resolveOrderUnitPrice(pricingSource(target), language, nextCurrency);
+    setUnitPrice(resolved ? (resolved.unitPrice / 100).toFixed(2) : '');
+  }
+
+  function selectClient(id: string) {
+    setClientId(id);
+    // The catalogue changes with the client — never keep a stale product.
+    setProductId('');
+    setUnitPrice('');
+  }
+
   function selectProduct(id: string) {
     setProductId(id);
     const next = products.find((p) => p.id === id);
     if (!next) return;
     setReportLanguage(next.defaultLanguage);
-    if (next.retailPrice !== null) setUnitPrice((next.retailPrice / 100).toFixed(2));
-    setCurrency(next.retailCurrency ?? client?.defaultCurrency ?? 'EUR');
+    const nextCurrency = pickCurrency(next, next.defaultLanguage, client?.defaultCurrency);
+    setCurrency(nextCurrency);
+    applyResolvedPrice(next, next.defaultLanguage, nextCurrency);
+  }
+
+  function selectLanguage(language: string) {
+    setReportLanguage(language);
+    if (!product) return;
+    // Prices are per language edition — re-pick the currency and price.
+    const nextCurrency = pickCurrency(product, language, currency);
+    setCurrency(nextCurrency);
+    applyResolvedPrice(product, language, nextCurrency);
+  }
+
+  function selectCurrency(nextCurrency: string) {
+    setCurrency(nextCurrency);
+    if (product) applyResolvedPrice(product, reportLanguage, nextCurrency);
   }
 
   function selectType(type: 'named' | 'bulk_named') {
@@ -123,7 +207,11 @@ export function OrderWizard({ clients, products, isSuperAdmin, action }: OrderWi
     unitPriceMinor !== null &&
       discountMinor !== null &&
       /^[A-Z]{3}$/.test(currency) &&
-      (totalMinor ?? -1) >= 0,
+      (totalMinor ?? -1) >= 0 &&
+      // Non-super-admins are held to the resolved price (the service enforces
+      // it) — don't let them submit an order that will be rejected.
+      (!priceLocked ||
+        (resolvedPrice !== null && unitPriceMinor === resolvedPrice.unitPrice)),
     true,
   ];
 
@@ -208,7 +296,7 @@ export function OrderWizard({ clients, products, isSuperAdmin, action }: OrderWi
             <select
               id="wizard-client"
               value={clientId}
-              onChange={(event) => setClientId(event.target.value)}
+              onChange={(event) => selectClient(event.target.value)}
               className="flex h-9 w-full max-w-md rounded-md border border-border bg-surface px-3 py-1 text-sm text-body shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <option value="">Select a client…</option>
@@ -239,15 +327,24 @@ export function OrderWizard({ clients, products, isSuperAdmin, action }: OrderWi
                 id="wizard-product"
                 value={productId}
                 onChange={(event) => selectProduct(event.target.value)}
-                className="flex h-9 w-full max-w-md rounded-md border border-border bg-surface px-3 py-1 text-sm text-body shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                disabled={productsLoading}
+                className="flex h-9 w-full max-w-md rounded-md border border-border bg-surface px-3 py-1 text-sm text-body shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
               >
-                <option value="">Select a product…</option>
+                <option value="">
+                  {productsLoading ? 'Loading products…' : 'Select a product…'}
+                </option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>
                 ))}
               </select>
+              {!productsLoading && products.length === 0 ? (
+                <p className="text-xs font-medium text-red">
+                  This client has no orderable products — they can only order their own
+                  organization&rsquo;s products they have access to.
+                </p>
+              ) : null}
               {product ? (
                 product.activeSelfVersion ? (
                   <p className="text-xs text-muted">
@@ -303,7 +400,7 @@ export function OrderWizard({ clients, products, isSuperAdmin, action }: OrderWi
               <select
                 id="wizard-language"
                 value={reportLanguage}
-                onChange={(event) => setReportLanguage(event.target.value)}
+                onChange={(event) => selectLanguage(event.target.value)}
                 className="flex h-9 w-full max-w-48 rounded-md border border-border bg-surface px-3 py-1 text-sm text-body shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {(product?.availableLanguages ?? ['en']).map((tag) => (
@@ -468,23 +565,58 @@ export function OrderWizard({ clients, products, isSuperAdmin, action }: OrderWi
                   onChange={(event) => setUnitPrice(event.target.value)}
                   placeholder="150.00"
                   inputMode="decimal"
-                  className="w-36"
+                  readOnly={priceLocked}
+                  className={cn('w-36', priceLocked && 'bg-surface-page text-muted')}
                 />
                 {unitPrice !== '' && unitPriceMinor === null ? (
                   <p className="text-xs text-red">Enter an amount like 150 or 150.00</p>
                 ) : null}
+                {resolvedPrice ? (
+                  <p className="text-xs text-muted">
+                    {resolvedPrice.source === 'price_list'
+                      ? `List price for ${reportLanguage}/${currency}: `
+                      : 'Retail price (no list price for this language): '}
+                    {formatMinor(resolvedPrice.unitPrice, currency)}
+                    {isSuperAdmin &&
+                    unitPriceMinor !== null &&
+                    unitPriceMinor !== resolvedPrice.unitPrice
+                      ? ' — manually overridden'
+                      : ''}
+                  </p>
+                ) : (
+                  <p className={cn('text-xs', priceLocked ? 'font-medium text-red' : 'text-muted')}>
+                    {priceLocked
+                      ? `No price is configured for ${reportLanguage} in ${currency} — ask the product's organization to add one.`
+                      : `No price configured for ${reportLanguage}/${currency} — enter one manually (super admin).`}
+                  </p>
+                )}
               </div>
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="wizard-currency" className="text-sm font-medium text-ink">
                   Currency
                 </label>
-                <Input
-                  id="wizard-currency"
-                  value={currency}
-                  onChange={(event) => setCurrency(event.target.value.toUpperCase())}
-                  maxLength={3}
-                  className="w-24 font-mono uppercase"
-                />
+                {priceLocked ? (
+                  <select
+                    id="wizard-currency"
+                    value={currency}
+                    onChange={(event) => selectCurrency(event.target.value)}
+                    className="flex h-9 w-24 rounded-md border border-border bg-surface px-3 py-1 font-mono text-sm uppercase text-body shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    {(currencyOptions.length > 0 ? currencyOptions : [currency]).map((code) => (
+                      <option key={code} value={code}>
+                        {code}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input
+                    id="wizard-currency"
+                    value={currency}
+                    onChange={(event) => selectCurrency(event.target.value.toUpperCase())}
+                    maxLength={3}
+                    className="w-24 font-mono uppercase"
+                  />
+                )}
               </div>
               {isSuperAdmin ? (
                 <div className="flex flex-col gap-1.5">

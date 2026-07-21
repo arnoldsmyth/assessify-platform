@@ -9,6 +9,42 @@ import type { DomainError } from '@assessify/domain';
  */
 
 // ---------------------------------------------------------------------------
+// Wizard data shapes (shared by the page, the products server action and the
+// client component — kept here so all three agree on one projection)
+// ---------------------------------------------------------------------------
+
+export interface WizardClient {
+  id: string;
+  name: string;
+  clientNumber: number;
+  defaultCurrency: string;
+}
+
+/** One org price-list row (integer minor units). */
+export interface WizardProductPrice {
+  language: string;
+  currency: string;
+  unitPrice: number;
+}
+
+/**
+ * Product as the wizard sees it: only products the SELECTED client may order
+ * (same organization + access — M3), with the price list for the pricing
+ * step. Loaded per client via the `listWizardProductsAction` server action.
+ */
+export interface WizardProduct {
+  id: string;
+  name: string;
+  defaultLanguage: string;
+  availableLanguages: string[];
+  prices: WizardProductPrice[];
+  retailPrice: number | null;
+  retailCurrency: string | null;
+  /** Active 'self' questionnaire version — orders pin it at creation. */
+  activeSelfVersion: { id: string; version: number } | null;
+}
+
+// ---------------------------------------------------------------------------
 // Form state
 // ---------------------------------------------------------------------------
 

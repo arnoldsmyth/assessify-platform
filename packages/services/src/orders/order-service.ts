@@ -1,5 +1,6 @@
 import {
   HOLD_PREVIOUS_STATUS_KEY,
+  canPlaceOrdersForClient,
   clientScopeIds,
   createOrderSchema,
   err,
@@ -12,6 +13,7 @@ import {
   orderTotals,
   orgScopeIds,
   resolveOrderTransitionTarget,
+  resolveOrderUnitPrice,
   transitionOrderSchema,
   uuid4,
   uuidv7,
@@ -28,10 +30,13 @@ import {
 } from '@assessify/domain';
 import type {
   AuditLogPage,
+  ClientProductAccessRepository,
+  ClientRepository,
   NewOrder,
   NewOrderSession,
   OrderRepository,
   OrderStatusPatch,
+  ProductPriceRepository,
   ProductRepository,
 } from '@assessify/repositories';
 
@@ -78,9 +83,16 @@ export interface OrderServiceDeps {
   orders: OrderRepository;
   /**
    * Resolves an order's product to its organization for org-scoped
-   * assessment_admin visibility (M2 re-scope, owner decisions 2026-07-21).
+   * assessment_admin visibility (M2 re-scope, owner decisions 2026-07-21)
+   * and for the M3 creation invariants (org match, access, price).
    */
   products: ProductRepository;
+  /** Resolves the ordering client's organization (M3 org-bound invariant). */
+  clients: ClientRepository;
+  /** Explicit grants for restricted products (`default_access = false`). */
+  clientProductAccess: ClientProductAccessRepository;
+  /** Org price list — unit-price resolution at creation (spec 06 step 3). */
+  productPrices: ProductPriceRepository;
   audit: AuditService;
   now?: () => Date;
   generateId?: () => string;
@@ -135,6 +147,18 @@ function conflict(id: string, expected: OrderStatus): DomainError {
   };
 }
 
+function clientNotFound(clientId: string): DomainError {
+  return { code: 'order/client_not_found', message: 'Client not found', detail: { clientId } };
+}
+
+function productNotFoundForOrder(productId: string): DomainError {
+  return {
+    code: 'order/product_not_found',
+    message: 'Product not found',
+    detail: { productId },
+  };
+}
+
 function invalidHoldState(id: string): DomainError {
   return {
     code: 'order/invalid_hold_state',
@@ -149,18 +173,6 @@ function invalidHoldState(id: string): DomainError {
 
 function auditActor(caller: CallerContext): AuditActor {
   return { kind: caller.kind, id: caller.id };
-}
-
-/** May the caller place an order for this client? */
-function canPlaceOrderFor(caller: CallerContext, clientId: string): boolean {
-  if (caller.kind === 'system') return true; // retail flow (G1) and workers
-  if (caller.kind !== 'user') return false; // api_key ordering lands with I1
-  if (isSuperAdmin(caller)) return true;
-  return caller.roles.some(
-    (a) =>
-      a.clientId === clientId &&
-      (a.role === 'client_admin' || (a.role === 'client_user' && a.permissions.canPlaceOrders))
-  );
 }
 
 /**
@@ -208,7 +220,7 @@ function transitionActorTags(caller: CallerContext, orderClientId: string): Orde
 // ---------------------------------------------------------------------------
 
 export function createOrderService(deps: OrderServiceDeps): OrderService {
-  const { orders, products, audit } = deps;
+  const { orders, products, clients, clientProductAccess, productPrices, audit } = deps;
   const now = deps.now ?? (() => new Date());
   const generateId = deps.generateId ?? uuidv7;
   const generateToken = deps.generateToken ?? uuid4;
@@ -233,15 +245,96 @@ export function createOrderService(deps: OrderServiceDeps): OrderService {
       if (!parsed.success) return err(validationError(zodIssues(parsed.error.issues)));
       const data = parsed.data;
 
-      if (!canPlaceOrderFor(caller, data.clientId)) {
+      if (!canPlaceOrdersForClient(caller, data.clientId)) {
         return err(forbiddenOrder({ action: 'create', clientId: data.clientId }));
       }
       // Per-line discounts are super_admin only (spec 06 wizard step 3).
       const hasDiscount = data.items.some((item) => item.discount > 0);
-      if (hasDiscount && !(caller.kind === 'user' && isSuperAdmin(caller))) {
+      if (hasDiscount && !isSuperAdmin(caller)) {
         return err(
           forbiddenOrder({ action: 'create', reason: 'discounts_require_super_admin' })
         );
+      }
+
+      // -------------------------------------------------------------------
+      // M3 invariants (owner model: Platform → Organization → Client): a
+      // client may only order their OWN organization's products they have
+      // access to. Structural — no caller (super_admin included) bypasses it.
+      // -------------------------------------------------------------------
+      const [client] = await clients.findByIds([data.clientId]);
+      if (!client) return err(clientNotFound(data.clientId));
+      const product = await products.findById(data.productId);
+      if (!product) return err(productNotFoundForOrder(data.productId));
+
+      if (product.organizationId !== client.organizationId) {
+        return err({
+          code: 'order/product_outside_organization',
+          message: 'The product does not belong to the client’s organization',
+          detail: {
+            clientId: data.clientId,
+            productId: data.productId,
+            clientOrganizationId: client.organizationId,
+            productOrganizationId: product.organizationId,
+          },
+        });
+      }
+      if (!product.defaultAccess) {
+        const grants = await clientProductAccess.listByClient(data.clientId);
+        if (!grants.some((grant) => grant.productId === data.productId)) {
+          return err({
+            code: 'order/product_not_available_to_client',
+            message:
+              'The client does not have access to this product — it is restricted and no access grant exists',
+            detail: { clientId: data.clientId, productId: data.productId },
+          });
+        }
+      }
+
+      // -------------------------------------------------------------------
+      // Price resolution (spec 06 step 3): the order's unit price comes from
+      // the org price list by (report language, order currency), falling back
+      // to the product's retail price when the currency matches; otherwise
+      // the order is unpriced. super_admin may manually override the unit
+      // price (spec 06 — same actor rule as discounts); everyone else must
+      // submit exactly the resolved price. Chain details:
+      // @assessify/domain resolveOrderUnitPrice.
+      // -------------------------------------------------------------------
+      if (!isSuperAdmin(caller)) {
+        const prices = await productPrices.listByProduct(data.productId);
+        const resolved = resolveOrderUnitPrice(
+          {
+            prices,
+            retailPrice: product.retailPrice,
+            retailCurrency: product.retailCurrency,
+          },
+          data.reportLanguage,
+          data.currency
+        );
+        if (!resolved) {
+          return err({
+            code: 'order/no_price_for_language',
+            message: `No price is configured for language '${data.reportLanguage}' in ${data.currency}`,
+            detail: {
+              productId: data.productId,
+              language: data.reportLanguage,
+              currency: data.currency,
+            },
+          });
+        }
+        if (data.items.some((item) => item.unitPrice !== resolved.unitPrice)) {
+          return err({
+            code: 'order/price_mismatch',
+            message:
+              'The submitted unit price does not match the resolved price for this language and currency',
+            detail: {
+              productId: data.productId,
+              language: data.reportLanguage,
+              currency: data.currency,
+              expectedUnitPrice: resolved.unitPrice,
+              priceSource: resolved.source,
+            },
+          });
+        }
       }
 
       const timestamp = now();

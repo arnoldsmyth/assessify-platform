@@ -5,12 +5,17 @@ import {
   type CallerContext,
   type Order,
   type OrderItem,
+  type Product,
   type RoleAssignment,
 } from '@assessify/domain';
 import type {
+  ClientProductAccessRepository,
+  ClientRepository,
+  ClientSummary,
   NewOrderItem,
   NewOrderSession,
   OrderRepository,
+  ProductPriceRepository,
   ProductRepository,
 } from '@assessify/repositories';
 import { describe, expect, it, vi } from 'vitest';
@@ -204,21 +209,88 @@ function makeRepo(seed: Order[] = []) {
 
 /**
  * Product resolver double: the order's product (PRODUCT_ID) belongs to
- * ORG_ID — enough for the org-scoped assessment_admin visibility checks.
+ * ORG_ID with open default access and no retail price unless overridden —
+ * enough for the org-scoped visibility checks and the M3 create invariants.
  */
-function makeProductsRepo(): ProductRepository {
+function makeProductsRepo(overrides: Partial<Product> = {}): ProductRepository {
+  const product = {
+    id: PRODUCT_ID,
+    organizationId: ORG_ID,
+    defaultAccess: true,
+    retailPrice: null,
+    retailCurrency: null,
+    ...overrides,
+  } as Product;
   return {
     async findById(id: string) {
-      if (id !== PRODUCT_ID) return null;
-      return { id: PRODUCT_ID, organizationId: ORG_ID } as Awaited<
-        ReturnType<ProductRepository['findById']>
-      >;
+      return id === product.id ? product : null;
     },
     findBySlug: vi.fn(),
     insert: vi.fn(),
     update: vi.fn(),
     list: vi.fn(),
   } as unknown as ProductRepository;
+}
+
+/** Client directory double: CLIENT_ID lives in ORG_ID, OTHER_CLIENT_ID elsewhere. */
+function makeClientsRepo(): ClientRepository {
+  const summaries: ClientSummary[] = [
+    { id: CLIENT_ID, organizationId: ORG_ID, clientNumber: 1, name: 'Acme', defaultCurrency: 'EUR' },
+    {
+      id: OTHER_CLIENT_ID,
+      organizationId: OTHER_ORG_ID,
+      clientNumber: 2,
+      name: 'Umbrella',
+      defaultCurrency: 'EUR',
+    },
+  ];
+  return {
+    async listAll() {
+      return summaries;
+    },
+    async findByIds(ids) {
+      return summaries.filter((client) => ids.includes(client.id));
+    },
+    async listByOrganizationIds(organizationIds) {
+      return summaries.filter((client) => organizationIds.includes(client.organizationId));
+    },
+  };
+}
+
+function makeAccessRepo(
+  grants: { clientId: string; productId: string }[] = []
+): ClientProductAccessRepository {
+  return {
+    grant: vi.fn(),
+    revoke: vi.fn(),
+    listByProduct: vi.fn(),
+    async listByClient(clientId: string) {
+      return grants
+        .filter((grant) => grant.clientId === clientId)
+        .map((grant) => ({ ...grant, createdAt: new Date('2026-07-01T00:00:00Z') }));
+    },
+  } as unknown as ClientProductAccessRepository;
+}
+
+/** Default price list: (en, EUR) → 15000, matching `createInput`'s line price. */
+const DEFAULT_PRICES = [{ language: 'en', currency: 'EUR', unitPrice: 15000 }];
+
+function makePricesRepo(
+  rows: { language: string; currency: string; unitPrice: number }[] = DEFAULT_PRICES
+): ProductPriceRepository {
+  return {
+    async listByProduct(productId: string) {
+      return rows.map((row, index) => ({
+        id: `01890000-0000-7000-8000-00000000pr${index}`,
+        productId,
+        ...row,
+        createdAt: new Date('2026-07-01T00:00:00Z'),
+        updatedAt: new Date('2026-07-01T00:00:00Z'),
+      }));
+    },
+    upsert: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as ProductPriceRepository;
 }
 
 function makeAudit(): AuditService {
@@ -237,12 +309,21 @@ function makeAudit(): AuditService {
   } as unknown as AuditService;
 }
 
-function makeService(seed: Order[] = []) {
+interface ServiceOptions {
+  product?: Partial<Product>;
+  prices?: { language: string; currency: string; unitPrice: number }[];
+  grants?: { clientId: string; productId: string }[];
+}
+
+function makeService(seed: Order[] = [], options: ServiceOptions = {}) {
   const { repo, rows, sessionRows } = makeRepo(seed);
   const audit = makeAudit();
   const service = createOrderService({
     orders: repo,
-    products: makeProductsRepo(),
+    products: makeProductsRepo(options.product),
+    clients: makeClientsRepo(),
+    clientProductAccess: makeAccessRepo(options.grants),
+    productPrices: makePricesRepo(options.prices),
     audit,
     now: () => new Date('2026-07-14T12:00:00Z'),
   });
@@ -471,10 +552,170 @@ describe('orderService.create', () => {
     vi.mocked(audit.record).mockResolvedValueOnce(
       err({ code: 'audit_write_failed', message: 'boom' })
     );
-    const service = createOrderService({ orders: repo, products: makeProductsRepo(), audit });
+    const service = createOrderService({
+      orders: repo,
+      products: makeProductsRepo(),
+      clients: makeClientsRepo(),
+      clientProductAccess: makeAccessRepo(),
+      productPrices: makePricesRepo(),
+      audit,
+    });
     const result = await service.create(superAdmin, createInput());
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('audit_write_failed');
+  });
+});
+
+describe('orderService.create — M3 invariants (org, access, price)', () => {
+  const RANDOM_ID = '01890000-0000-7000-8000-00000000dead';
+
+  it('rejects ordering another organization’s product — even for super_admin', async () => {
+    const { service } = makeService();
+    // OTHER_CLIENT_ID belongs to OTHER_ORG_ID; PRODUCT_ID belongs to ORG_ID.
+    for (const caller of [superAdmin, otherClientAdmin]) {
+      const result = await service.create(caller, createInput({ clientId: OTHER_CLIENT_ID }));
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error.code).toBe('order/product_outside_organization');
+      expect(result.error.detail).toMatchObject({
+        clientOrganizationId: OTHER_ORG_ID,
+        productOrganizationId: ORG_ID,
+      });
+    }
+  });
+
+  it('rejects unknown clients and products with typed errors', async () => {
+    const { service } = makeService();
+    const noClient = await service.create(superAdmin, createInput({ clientId: RANDOM_ID }));
+    expect(noClient.ok).toBe(false);
+    if (!noClient.ok) expect(noClient.error.code).toBe('order/client_not_found');
+
+    const noProduct = await service.create(superAdmin, createInput({ productId: RANDOM_ID }));
+    expect(noProduct.ok).toBe(false);
+    if (!noProduct.ok) expect(noProduct.error.code).toBe('order/product_not_found');
+  });
+
+  it('rejects restricted products (default_access=false) without a grant — even for super_admin', async () => {
+    const { service } = makeService([], { product: { defaultAccess: false } });
+    for (const caller of [clientAdmin, superAdmin]) {
+      const result = await service.create(caller, createInput());
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('order/product_not_available_to_client');
+    }
+  });
+
+  it('accepts restricted products when the client holds an access grant', async () => {
+    const { service } = makeService([], {
+      product: { defaultAccess: false },
+      grants: [{ clientId: CLIENT_ID, productId: PRODUCT_ID }],
+    });
+    const result = await service.create(clientAdmin, createInput());
+    expect(result.ok).toBe(true);
+  });
+
+  it('ignores another client’s grant for the restricted product', async () => {
+    const { service } = makeService([], {
+      product: { defaultAccess: false },
+      grants: [{ clientId: OTHER_CLIENT_ID, productId: PRODUCT_ID }],
+    });
+    const result = await service.create(clientAdmin, createInput());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('order/product_not_available_to_client');
+  });
+
+  it('holds non-super-admin callers to the resolved price list price', async () => {
+    const { service } = makeService();
+    const result = await service.create(
+      clientAdmin,
+      createInput({ items: [{ description: 'x', unitPrice: 14999 }] })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('order/price_mismatch');
+    expect(result.error.detail).toMatchObject({
+      expectedUnitPrice: 15000,
+      priceSource: 'price_list',
+      language: 'en',
+      currency: 'EUR',
+    });
+  });
+
+  it('lets super_admin manually override the unit price', async () => {
+    const { service } = makeService();
+    const result = await service.create(
+      superAdmin,
+      createInput({ items: [{ description: 'x', unitPrice: 100 }] })
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.total).toBe(100);
+  });
+
+  it('resolves the price per language edition (report language)', async () => {
+    const { service } = makeService([], {
+      prices: [
+        { language: 'en', currency: 'EUR', unitPrice: 15000 },
+        { language: 'fr', currency: 'EUR', unitPrice: 15500 },
+      ],
+    });
+    const ok1 = await service.create(
+      clientAdmin,
+      createInput({
+        reportLanguage: 'fr',
+        items: [{ description: 'x', unitPrice: 15500 }],
+      })
+    );
+    expect(ok1.ok).toBe(true);
+
+    const wrong = await service.create(
+      clientAdmin,
+      createInput({ reportLanguage: 'fr' }) // 15000 is the en price
+    );
+    expect(wrong.ok).toBe(false);
+    if (!wrong.ok) expect(wrong.error.code).toBe('order/price_mismatch');
+  });
+
+  it('rejects unpriced (language, currency) pairs for non-super-admins only', async () => {
+    const { service } = makeService();
+    for (const input of [
+      createInput({ reportLanguage: 'de' }), // language without a price row
+      createInput({ currency: 'USD' }), // currency without a price row
+    ]) {
+      const denied = await service.create(clientAdmin, input);
+      expect(denied.ok).toBe(false);
+      if (!denied.ok) expect(denied.error.code).toBe('order/no_price_for_language');
+
+      // super_admin manual pricing remains possible for unpriced pairs.
+      const overridden = await service.create(superAdmin, input);
+      expect(overridden.ok).toBe(true);
+    }
+  });
+
+  it('falls back to the retail price when the currency matches', async () => {
+    const options: ServiceOptions = {
+      prices: [],
+      product: { retailPrice: 13000, retailCurrency: 'EUR' },
+    };
+    const { service } = makeService([], options);
+    const matching = await service.create(
+      clientAdmin,
+      createInput({ items: [{ description: 'x', unitPrice: 13000 }] })
+    );
+    expect(matching.ok).toBe(true);
+
+    const { service: service2 } = makeService([], options);
+    const wrongCurrency = await service2.create(
+      clientAdmin,
+      createInput({ currency: 'USD', items: [{ description: 'x', unitPrice: 13000 }] })
+    );
+    expect(wrongCurrency.ok).toBe(false);
+    if (!wrongCurrency.ok) expect(wrongCurrency.error.code).toBe('order/no_price_for_language');
+  });
+
+  it('rejects unpriced orders from system callers too (no silent bypass)', async () => {
+    const { service } = makeService([], { prices: [] });
+    const result = await service.create(system, createInput());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('order/no_price_for_language');
   });
 });
 
@@ -665,7 +906,14 @@ describe('orderService.transition', () => {
     vi.mocked(audit.record).mockResolvedValueOnce(
       err({ code: 'audit_write_failed', message: 'boom' })
     );
-    const service = createOrderService({ orders: repo, products: makeProductsRepo(), audit });
+    const service = createOrderService({
+      orders: repo,
+      products: makeProductsRepo(),
+      clients: makeClientsRepo(),
+      clientProductAccess: makeAccessRepo(),
+      productPrices: makePricesRepo(),
+      audit,
+    });
     const result = await service.transition(superAdmin, ORDER_ID, { event: 'submit' });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('audit_write_failed');

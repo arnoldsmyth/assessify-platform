@@ -6,9 +6,13 @@ import {
   type RoleAssignment,
 } from '@assessify/domain';
 import type {
+  ClientProductAccessRepository,
+  ClientRepository,
+  ClientSummary,
   OrganizationRepository,
   ProductListQuery,
   ProductPatch,
+  ProductPriceRepository,
   ProductRepository,
 } from '@assessify/repositories';
 import { describe, expect, it, vi } from 'vitest';
@@ -17,6 +21,9 @@ import type { AuditService } from '../audit';
 import { createProductService } from './product-service';
 
 const ORG_ID = '01890000-0000-7000-8000-0000000000a1';
+const OTHER_ORG_ID = '01890000-0000-7000-8000-0000000000a2';
+const CLIENT_ID = '33333333-3333-7333-8333-333333333333';
+const OTHER_ORG_CLIENT_ID = '44444444-4444-7444-8444-444444444444';
 
 function assignment(role: RoleAssignment['role'], clientId: string | null = null): RoleAssignment {
   return {
@@ -158,12 +165,79 @@ function makeOrganizationsRepo(): OrganizationRepository {
   };
 }
 
-function makeService(seed: Product[] = []) {
+/** Client directory double: CLIENT_ID lives in ORG_ID, the other elsewhere. */
+function makeClientsRepo(): ClientRepository {
+  const summaries: ClientSummary[] = [
+    { id: CLIENT_ID, organizationId: ORG_ID, clientNumber: 1, name: 'Acme', defaultCurrency: 'EUR' },
+    {
+      id: OTHER_ORG_CLIENT_ID,
+      organizationId: OTHER_ORG_ID,
+      clientNumber: 2,
+      name: 'Umbrella',
+      defaultCurrency: 'EUR',
+    },
+  ];
+  return {
+    async listAll() {
+      return summaries;
+    },
+    async findByIds(ids) {
+      return summaries.filter((client) => ids.includes(client.id));
+    },
+    async listByOrganizationIds(organizationIds) {
+      return summaries.filter((client) => organizationIds.includes(client.organizationId));
+    },
+  };
+}
+
+function makeAccessRepo(
+  grants: { clientId: string; productId: string }[] = []
+): ClientProductAccessRepository {
+  return {
+    grant: vi.fn(),
+    revoke: vi.fn(),
+    listByProduct: vi.fn(),
+    async listByClient(clientId: string) {
+      return grants
+        .filter((grant) => grant.clientId === clientId)
+        .map((grant) => ({ ...grant, createdAt: new Date('2026-07-01T00:00:00Z') }));
+    },
+  } as unknown as ClientProductAccessRepository;
+}
+
+function makePricesRepo(
+  rows: { productId: string; language: string; currency: string; unitPrice: number }[] = []
+): ProductPriceRepository {
+  return {
+    async listByProduct(productId: string) {
+      return rows
+        .filter((row) => row.productId === productId)
+        .map((row, index) => ({
+          id: `price-${index}`,
+          ...row,
+          createdAt: new Date('2026-07-01T00:00:00Z'),
+          updatedAt: new Date('2026-07-01T00:00:00Z'),
+        }));
+    },
+    upsert: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as ProductPriceRepository;
+}
+
+interface ServiceOptions {
+  grants?: { clientId: string; productId: string }[];
+  prices?: { productId: string; language: string; currency: string; unitPrice: number }[];
+}
+
+function makeService(seed: Product[] = [], options: ServiceOptions = {}) {
   const { repo, rows } = makeRepo(seed);
   const audit = makeAudit();
   const service = createProductService({
     products: repo,
     organizations: makeOrganizationsRepo(),
+    clients: makeClientsRepo(),
+    clientProductAccess: makeAccessRepo(options.grants),
+    productPrices: makePricesRepo(options.prices),
     audit,
     now: () => new Date('2026-07-14T12:00:00Z'),
   });
@@ -434,10 +508,10 @@ describe('productService.list / get', () => {
 describe('productService.listOrderable', () => {
   const orderingClientUser: CallerContext = {
     kind: 'user',
-    id: '44444444-4444-7444-8444-444444444444',
+    id: '55555555-5555-7555-8555-555555555555',
     roles: [
       {
-        ...assignment('client_user', '33333333-3333-7333-8333-333333333333'),
+        ...assignment('client_user', CLIENT_ID),
         permissions: {
           products: 'all',
           groups: 'all',
@@ -449,7 +523,7 @@ describe('productService.listOrderable', () => {
     ],
   };
 
-  it('returns a slim, name-sorted projection of active products to order placers', async () => {
+  it('returns the client’s orderable catalogue with price-list rows, name A→Z', async () => {
     const active = fixtureProduct({ retailEnabled: true, retailPrice: 15000, retailCurrency: 'EUR' });
     const retired = fixtureProduct({
       id: '01890000-0000-7000-8000-000000000002',
@@ -457,10 +531,15 @@ describe('productService.listOrderable', () => {
       name: 'Aardvark (retired)',
       status: 'retired',
     });
-    const { service } = makeService([active, retired]);
+    const { service } = makeService([active, retired], {
+      prices: [
+        { productId: active.id, language: 'en', currency: 'EUR', unitPrice: 14000 },
+        { productId: active.id, language: 'en', currency: 'USD', unitPrice: 16000 },
+      ],
+    });
 
     for (const caller of [superAdmin, clientAdmin, orderingClientUser]) {
-      const result = await service.listOrderable(caller);
+      const result = await service.listOrderable(caller, CLIENT_ID);
       expect(result.ok).toBe(true);
       if (!result.ok) continue;
       expect(result.value).toEqual([
@@ -470,6 +549,10 @@ describe('productService.listOrderable', () => {
           defaultLanguage: 'en',
           availableLanguages: ['en'],
           reportPageSizeDefault: 'a4',
+          prices: [
+            { language: 'en', currency: 'EUR', unitPrice: 14000 },
+            { language: 'en', currency: 'USD', unitPrice: 16000 },
+          ],
           retailPrice: 15000,
           retailCurrency: 'EUR',
         },
@@ -477,19 +560,62 @@ describe('productService.listOrderable', () => {
     }
   });
 
+  it('excludes other organizations’ products from the client’s catalogue', async () => {
+    const own = fixtureProduct();
+    const foreign = fixtureProduct({
+      id: '01890000-0000-7000-8000-000000000003',
+      slug: 'foreign',
+      name: 'Foreign',
+      organizationId: OTHER_ORG_ID,
+    });
+    const { service } = makeService([own, foreign]);
+    const result = await service.listOrderable(superAdmin, CLIENT_ID);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.map((p) => p.id)).toEqual([own.id]);
+  });
+
+  it('includes restricted products only when the client holds a grant', async () => {
+    const restricted = fixtureProduct({ defaultAccess: false });
+    const without = await makeService([restricted]).service.listOrderable(superAdmin, CLIENT_ID);
+    expect(without.ok).toBe(true);
+    if (without.ok) expect(without.value).toEqual([]);
+
+    const withGrant = await makeService([restricted], {
+      grants: [{ clientId: CLIENT_ID, productId: restricted.id }],
+    }).service.listOrderable(superAdmin, CLIENT_ID);
+    expect(withGrant.ok).toBe(true);
+    if (withGrant.ok) expect(withGrant.value.map((p) => p.id)).toEqual([restricted.id]);
+  });
+
   it('denies callers who cannot place orders', async () => {
     const { service } = makeService([fixtureProduct()]);
     const viewer: CallerContext = {
       ...clientAdmin,
-      roles: [assignment('client_user', '33333333-3333-7333-8333-333333333333')],
+      roles: [assignment('client_user', CLIENT_ID)],
     };
     for (const caller of [
       viewer,
       { kind: 'api_key', id: 'key-1', roles: [] } as CallerContext,
     ]) {
-      const result = await service.listOrderable(caller);
+      const result = await service.listOrderable(caller, CLIENT_ID);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.code).toBe('product/forbidden');
+    }
+  });
+
+  it('denies client-scoped callers browsing another client’s catalogue', async () => {
+    const { service } = makeService([fixtureProduct()]);
+    const result = await service.listOrderable(clientAdmin, OTHER_ORG_CLIENT_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('product/forbidden');
+  });
+
+  it('returns client_not_found for unknown or malformed client ids', async () => {
+    const { service } = makeService([fixtureProduct()]);
+    for (const clientId of ['not-a-uuid', '01890000-0000-7000-8000-00000000dead']) {
+      const result = await service.listOrderable(superAdmin, clientId);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('product/client_not_found');
     }
   });
 });

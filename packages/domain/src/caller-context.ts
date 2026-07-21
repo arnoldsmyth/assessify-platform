@@ -86,6 +86,24 @@ export function clientScopeIds(context: CallerContext): string[] {
 }
 
 /**
+ * Spec 05 permission matrix: may the caller place orders FOR this client?
+ * super_admin = any client; client_admin / client_user with canPlaceOrders =
+ * their own client(s); system = internal flows (retail G1, workers). api_key
+ * ordering lands with I1. Shared by the order service (create) and the
+ * product catalogue (client-scoped `listOrderable`).
+ */
+export function canPlaceOrdersForClient(context: CallerContext, clientId: string): boolean {
+  if (context.kind === 'system') return true;
+  if (context.kind !== 'user') return false;
+  if (isSuperAdmin(context)) return true;
+  return context.roles.some(
+    (a) =>
+      a.clientId === clientId &&
+      (a.role === 'client_admin' || (a.role === 'client_user' && a.permissions.canPlaceOrders))
+  );
+}
+
+/**
  * Organization ids the caller is scoped to via assessment_admin rows.
  * "May manage this product" is resolved through the product's organization:
  * load the product and check its organizationId against this list.
