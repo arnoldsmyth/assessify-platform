@@ -89,11 +89,13 @@ export default async function OrderDetailPage({
   const { order, items, sessions } = result.value;
 
   // Decoration: names are best-effort — scoped callers may not see the client
-  // list or the (possibly retired) product; fall back to shortened ids.
+  // list or the (possibly retired / no-longer-accessible) product; fall back
+  // to shortened ids. listOrderable is client-scoped since M3, so ask for the
+  // order's own client's catalogue.
   const [historyResult, clientsResult, productsResult] = await Promise.all([
     getOrderService().history(caller, id),
     getClientDirectoryService().listVisible(caller),
-    getProductService().listOrderable(caller),
+    getProductService().listOrderable(caller, order.clientId),
   ]);
   const clientName = clientsResult.ok
     ? (clientsResult.value.find((client) => client.id === order.clientId)?.name ??

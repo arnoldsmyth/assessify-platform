@@ -2,17 +2,14 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
 import { isSuperAdmin } from '@assessify/domain';
-import {
-  getClientDirectoryService,
-  getProductService,
-  getQuestionnaireVersionService,
-} from '@assessify/services';
+import { getClientDirectoryService } from '@assessify/services';
 import { Card } from '@assessify/ui';
 
 import { requireCallerContext } from '@/lib/caller-context';
 
-import { createOrderAction } from '../actions';
-import { OrderWizard, type WizardClient, type WizardProduct } from '../_components/order-wizard';
+import { createOrderAction, listWizardProductsAction } from '../actions';
+import { OrderWizard } from '../_components/order-wizard';
+import type { WizardClient } from '../_lib/form';
 
 // Reads live data on every request — never prerendered at build time.
 export const dynamic = 'force-dynamic';
@@ -20,12 +17,9 @@ export const dynamic = 'force-dynamic';
 export default async function NewOrderPage() {
   const caller = await requireCallerContext();
 
-  const [clientsResult, productsResult] = await Promise.all([
-    getClientDirectoryService().listPlaceable(caller),
-    getProductService().listOrderable(caller),
-  ]);
+  const clientsResult = await getClientDirectoryService().listPlaceable(caller);
 
-  if (!clientsResult.ok || !productsResult.ok || clientsResult.value.length === 0) {
+  if (!clientsResult.ok || clientsResult.value.length === 0) {
     return (
       <div className="flex flex-col gap-4">
         <BackLink />
@@ -47,27 +41,9 @@ export default async function NewOrderPage() {
     defaultCurrency: client.defaultCurrency,
   }));
 
-  // Resolve each product's active 'self' questionnaire version — the wizard
-  // pins it on the order (spec 06). Products without one are shown disabled.
-  const versionService = getQuestionnaireVersionService();
-  const products: WizardProduct[] = await Promise.all(
-    productsResult.value.map(async (product): Promise<WizardProduct> => {
-      const versions = await versionService.listActiveForOrdering(caller, product.id);
-      const activeSelf = versions.ok
-        ? (versions.value.find((version) => version.variant === 'self') ?? null)
-        : null;
-      return {
-        id: product.id,
-        name: product.name,
-        defaultLanguage: product.defaultLanguage,
-        availableLanguages: product.availableLanguages,
-        retailPrice: product.retailPrice,
-        retailCurrency: product.retailCurrency,
-        activeSelfVersion: activeSelf ? { id: activeSelf.id, version: activeSelf.version } : null,
-      };
-    })
-  );
-
+  // Products are NOT loaded here: the orderable catalogue depends on the
+  // selected client (M3 — same organization + access), so the wizard fetches
+  // it per client via the `listWizardProductsAction` server action.
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
@@ -81,9 +57,9 @@ export default async function NewOrderPage() {
 
       <OrderWizard
         clients={clients}
-        products={products}
         isSuperAdmin={isSuperAdmin(caller)}
         action={createOrderAction}
+        loadProducts={listWizardProductsAction}
       />
     </div>
   );

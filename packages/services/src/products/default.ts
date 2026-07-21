@@ -1,6 +1,9 @@
 import {
   createAuditLogRepository,
+  createClientProductAccessRepository,
+  createClientRepository,
   createOrganizationRepository,
+  createProductPriceRepository,
   DrizzleProductRepository,
   getDbHandle,
 } from '@assessify/repositories';
@@ -31,6 +34,9 @@ export function getProductService(): ProductService {
     instance = createProductService({
       products: new DrizzleProductRepository(db),
       organizations: createOrganizationRepository(db),
+      clients: createClientRepository(db),
+      clientProductAccess: createClientProductAccessRepository(db),
+      productPrices: createProductPriceRepository(db),
       audit: createAuditService({ auditLogRepository: createAuditLogRepository(db) }),
     });
   }

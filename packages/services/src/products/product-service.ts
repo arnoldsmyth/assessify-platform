@@ -1,4 +1,5 @@
 import {
+  canPlaceOrdersForClient,
   createProductSchema,
   err,
   isSuperAdmin,
@@ -10,13 +11,17 @@ import {
   type AuditActor,
   type CallerContext,
   type DomainError,
+  type OrderPriceRow,
   type Product,
   type Result,
   type UpdateProduct,
 } from '@assessify/domain';
 import type {
+  ClientProductAccessRepository,
+  ClientRepository,
   OrganizationRepository,
   ProductPatch,
+  ProductPriceRepository,
   ProductRepository,
 } from '@assessify/repositories';
 
@@ -47,6 +52,11 @@ export interface OrderableProduct {
   defaultLanguage: string;
   availableLanguages: string[];
   reportPageSizeDefault: 'a4' | 'letter';
+  /**
+   * Org price list rows (M1) — the wizard resolves the unit price per
+   * (report language, currency) from these via `resolveOrderUnitPrice`.
+   */
+  prices: OrderPriceRow[];
   /** Retail/list price fallback for the pricing step (integer minor units). */
   retailPrice: number | null;
   retailCurrency: string | null;
@@ -60,18 +70,26 @@ export interface ProductService {
   get(caller: CallerContext, id: string): Promise<Result<Product>>;
   list(caller: CallerContext, query: unknown): Promise<Result<ProductList>>;
   /**
-   * Active products for the order wizard, name A→Z. Available to anyone who
-   * may place orders (spec 05: super_admin, client_admin, client_user with
-   * canPlaceOrders) — unlike the management methods above, which are
-   * super_admin only.
+   * Active products THIS CLIENT may order, name A→Z — same-organization
+   * products the client has access to (default_access, or an explicit
+   * client_product_access grant), with their price-list rows (M3). Available
+   * to anyone who may place orders FOR that client (spec 05: super_admin,
+   * client_admin, client_user with canPlaceOrders) — unlike the management
+   * methods above, which are super_admin only.
    */
-  listOrderable(caller: CallerContext): Promise<Result<OrderableProduct[]>>;
+  listOrderable(caller: CallerContext, clientId: string): Promise<Result<OrderableProduct[]>>;
 }
 
 export interface ProductServiceDeps {
   products: ProductRepository;
   /** Existence check for the owning organization on create. */
   organizations: OrganizationRepository;
+  /** Resolves the ordering client's organization (M3 client-scoped catalogue). */
+  clients: ClientRepository;
+  /** Explicit grants for restricted products (`default_access = false`). */
+  clientProductAccess: ClientProductAccessRepository;
+  /** Org price list surfaced to the wizard's pricing step (M3). */
+  productPrices: ProductPriceRepository;
   audit: AuditService;
   now?: () => Date;
   generateId?: () => string;
@@ -141,7 +159,7 @@ function definedFields(patch: UpdateProduct): UpdateProduct {
 }
 
 export function createProductService(deps: ProductServiceDeps): ProductService {
-  const { products, organizations, audit } = deps;
+  const { products, organizations, clients, clientProductAccess, productPrices, audit } = deps;
   const now = deps.now ?? (() => new Date());
   const generateId = deps.generateId ?? uuidv7;
 
@@ -292,7 +310,7 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
       return ok({ items: result.items, total: result.total, page, pageSize });
     },
 
-    async listOrderable(caller) {
+    async listOrderable(caller, clientId) {
       if (!canBrowseOrderCatalogue(caller)) {
         return err({
           code: 'product/forbidden',
@@ -300,22 +318,65 @@ export function createProductService(deps: ProductServiceDeps): ProductService {
           detail: { kind: caller.kind, roles: caller.roles.map((r) => r.role) },
         });
       }
-      const result = await products.list({ status: 'active', limit: 500, offset: 0 });
+      if (!UUID_RE.test(clientId)) {
+        return err({
+          code: 'product/client_not_found',
+          message: 'Client not found',
+          detail: { clientId },
+        });
+      }
+      // Catalogue browsing is per client: the caller must be able to place
+      // orders FOR this client (spec 05 — UUID knowledge is never sufficient).
+      if (!canPlaceOrdersForClient(caller, clientId)) {
+        return err({
+          code: 'product/forbidden',
+          message: 'You do not have permission to place orders for this client',
+          detail: { clientId },
+        });
+      }
+      const [client] = await clients.findByIds([clientId]);
+      if (!client) {
+        return err({
+          code: 'product/client_not_found',
+          message: 'Client not found',
+          detail: { clientId },
+        });
+      }
+
+      // M3 invariant, mirrored by the order service at creation: a client may
+      // only order their own organization's products they have access to.
+      const [result, grants] = await Promise.all([
+        products.list({ status: 'active', limit: 500, offset: 0 }),
+        clientProductAccess.listByClient(clientId),
+      ]);
+      const grantedProductIds = new Set(grants.map((grant) => grant.productId));
+      const orderable = result.items.filter(
+        (product) =>
+          product.organizationId === client.organizationId &&
+          (product.defaultAccess || grantedProductIds.has(product.id))
+      );
+      const priceLists = await Promise.all(
+        orderable.map((product) => productPrices.listByProduct(product.id))
+      );
       return ok(
-        result.items
-          .slice()
-          .sort((a, b) => a.name.localeCompare(b.name))
+        orderable
           .map(
-            (product): OrderableProduct => ({
+            (product, index): OrderableProduct => ({
               id: product.id,
               name: product.name,
               defaultLanguage: product.defaultLanguage,
               availableLanguages: product.availableLanguages,
               reportPageSizeDefault: product.reportPageSizeDefault,
+              prices: (priceLists[index] ?? []).map((price) => ({
+                language: price.language,
+                currency: price.currency,
+                unitPrice: price.unitPrice,
+              })),
               retailPrice: product.retailPrice,
               retailCurrency: product.retailCurrency,
             })
           )
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
     },
   };
