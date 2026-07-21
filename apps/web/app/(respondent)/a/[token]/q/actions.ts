@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers';
 
 import { RESPONDENT_SESSION_COOKIE, type Result } from '@assessify/domain';
-import type { SaveAnswersOutcome, SubmitOutcome } from '@assessify/services';
+import type { SaveAnswersOutcome, SetLanguageOutcome, SubmitOutcome } from '@assessify/services';
 import type { ResponseProgress } from '@assessify/domain';
 
 import { getWebQuestionnaireSessionService } from '@/lib/questionnaire-session';
@@ -34,4 +34,14 @@ export async function savePositionAction(sectionKey: string): Promise<Result<Res
 /** Final submit: server-side completeness validation + immutability flip. */
 export async function submitAction(): Promise<Result<SubmitOutcome>> {
   return getWebQuestionnaireSessionService().submit(await sessionCookie());
+}
+
+/**
+ * C6: switch the respondent's display language. The service validates the
+ * language against the product's available languages and persists it; the
+ * client refreshes so the server re-resolves translations in the new
+ * language. Answers are never touched (language-independent keys).
+ */
+export async function setLanguageAction(language: string): Promise<Result<SetLanguageOutcome>> {
+  return getWebQuestionnaireSessionService().setLanguage(await sessionCookie(), language);
 }

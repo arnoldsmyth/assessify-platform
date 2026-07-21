@@ -53,3 +53,28 @@ export function humanizeKey(key: string): string {
   const words = tail.replace(/[._-]+/g, ' ').trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+// ---------------------------------------------------------------------------
+// Language switcher helpers (C6) — pure, unit-tested
+// ---------------------------------------------------------------------------
+
+/** The switcher only appears when there is an actual choice to make. */
+export function showLanguageSwitcher(availableLanguages: string[]): boolean {
+  return availableLanguages.length > 1;
+}
+
+/**
+ * Human-readable endonym for a BCP 47 tag ("fr" → "Français"), falling back
+ * to the raw tag when the runtime cannot name it. Rendering each language in
+ * itself keeps the switcher usable for a respondent stuck in a language they
+ * cannot read.
+ */
+export function languageDisplayName(tag: string): string {
+  try {
+    const name = new Intl.DisplayNames([tag], { type: 'language' }).of(tag);
+    if (!name || name === tag) return tag;
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  } catch {
+    return tag;
+  }
+}

@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { humanizeKey, labelFromKey, setTranslationStrings } from './renderer';
+import {
+  humanizeKey,
+  labelFromKey,
+  languageDisplayName,
+  setTranslationStrings,
+  showLanguageSwitcher,
+} from './renderer';
 
 /**
- * Label resolution (asy-sex). The strings context is module-level state, so
- * every test resets it.
+ * Label resolution (asy-sex) + language switcher helpers (C6). The strings
+ * context is module-level state, so every test resets it.
  */
 
 afterEach(() => setTranslationStrings({}));
@@ -41,5 +47,25 @@ describe('humanizeKey', () => {
   it('drops the namespace and title-cases the tail', () => {
     expect(humanizeKey('pro-d.section_one.title')).toBe('Section one title');
     expect(humanizeKey('no-namespace')).toBe('No namespace');
+  });
+});
+
+describe('showLanguageSwitcher', () => {
+  it('only shows for more than one available language', () => {
+    expect(showLanguageSwitcher([])).toBe(false);
+    expect(showLanguageSwitcher(['en'])).toBe(false);
+    expect(showLanguageSwitcher(['en', 'fr'])).toBe(true);
+  });
+});
+
+describe('languageDisplayName', () => {
+  it('names a language in itself (endonym), capitalized', () => {
+    expect(languageDisplayName('en')).toBe('English');
+    expect(languageDisplayName('fr')).toBe('Français');
+    expect(languageDisplayName('pt-BR')).toMatch(/^Portugu/);
+  });
+
+  it('falls back to the raw tag when the runtime cannot name it', () => {
+    expect(languageDisplayName('zz')).toBe('zz');
   });
 });

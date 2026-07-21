@@ -1,6 +1,7 @@
 import {
   answersPatchSchema,
   err,
+  languageTagSchema,
   ok,
   questionKeySchema,
   uuidv7,
@@ -117,6 +118,19 @@ export interface QuestionnaireSessionService {
    * and the session completed, and audit the submission.
    */
   submit(sessionToken: unknown): Promise<Result<SubmitOutcome>>;
+  /**
+   * C6: switch the respondent's display language mid-flight. Rejects
+   * languages the product does not offer; persists the choice on the draft
+   * response row (the renderer's single source of truth), after which
+   * `loadState` resolves translations in the new language. Answers are
+   * language-independent option/question keys and are NEVER touched by a
+   * switch (spec 07 "switching mid-flight is lossless").
+   */
+  setLanguage(sessionToken: unknown, language: unknown): Promise<Result<SetLanguageOutcome>>;
+}
+
+export interface SetLanguageOutcome {
+  language: string;
 }
 
 /** Narrow B4 port (asy-sex): exactly the resolution half of the translation
@@ -193,6 +207,21 @@ function sectionInvalid(): DomainError {
   return {
     code: 'questionnaire/section_invalid',
     message: 'That section does not exist in this questionnaire.',
+  };
+}
+
+function languageInvalid(): DomainError {
+  return {
+    code: 'questionnaire/language_invalid',
+    message: 'That language code is not valid.',
+  };
+}
+
+function languageUnavailable(language: string, availableLanguages: string[]): DomainError {
+  return {
+    code: 'questionnaire/language_unavailable',
+    message: 'That language is not available for this assessment.',
+    detail: { language, availableLanguages },
   };
 }
 
@@ -465,6 +494,39 @@ export function createQuestionnaireSessionService(
       const updated = await responses.updateProgress(response.sessionId, progress);
       if (!updated) return err(alreadySubmitted());
       return ok(updated.progress);
+    },
+
+    async setLanguage(sessionToken, language) {
+      const parsed = languageTagSchema.safeParse(language);
+      if (!parsed.success) return err(languageInvalid());
+
+      const draft = await loadDraft(sessionToken);
+      if (!draft.ok) return draft;
+      const { response, definition } = draft.value;
+
+      // Spec 07 "Language switching": the switcher lists (and the service
+      // only accepts) the product's available languages.
+      const product = await products.findById(response.productId);
+      const availableLanguages = product?.availableLanguages ?? [];
+      if (!availableLanguages.includes(parsed.data)) {
+        return err(languageUnavailable(parsed.data, availableLanguages));
+      }
+
+      // Persist on the response row ONLY — the renderer's single source of
+      // truth for the active language. Progress is recomputed as on every
+      // other write path; answers are language-independent keys and are
+      // never touched (lossless switching, spec 07).
+      const progress = computeProgress(
+        definition,
+        response.answers,
+        visibility,
+        response.progress.currentSectionKey
+      );
+      const updated = await responses.updateProgress(response.sessionId, progress, {
+        language: parsed.data,
+      });
+      if (!updated) return err(alreadySubmitted());
+      return ok({ language: updated.language ?? parsed.data });
     },
 
     async submit(sessionToken) {

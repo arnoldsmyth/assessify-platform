@@ -1,12 +1,19 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AnswerRecord, AnswersMap } from '@assessify/domain';
 import { Button, Card, CardContent, CardHeader, CardTitle } from '@assessify/ui';
 
-import { saveAnswersAction, savePositionAction, submitAction } from '../actions';
-import { labelFromKey, setTranslationStrings, type Definition } from '../_lib/renderer';
+import { saveAnswersAction, savePositionAction, setLanguageAction, submitAction } from '../actions';
+import {
+  labelFromKey,
+  languageDisplayName,
+  setTranslationStrings,
+  showLanguageSwitcher,
+  type Definition,
+} from '../_lib/renderer';
 import {
   computeVisibility,
   initialVisibleSectionIndex,
@@ -53,6 +60,10 @@ interface QuestionnaireRendererProps {
   resumeSectionIndex: number;
   /** Server-resolved translation copy for the active language (asy-sex). */
   strings: Record<string, string>;
+  /** Active display language. */
+  language: string;
+  /** Languages the respondent may switch to (C6). */
+  availableLanguages: string[];
 }
 
 export function QuestionnaireRenderer({
@@ -61,6 +72,8 @@ export function QuestionnaireRenderer({
   initialAnswers,
   resumeSectionIndex,
   strings,
+  language,
+  availableLanguages,
 }: QuestionnaireRendererProps) {
   // Register the resolved strings BEFORE anything renders a label: every
   // labelFromKey call-site below and inside the per-type question components
@@ -68,6 +81,7 @@ export function QuestionnaireRenderer({
   // each render pass keeps a post-switch refresh in sync.
   setTranslationStrings(strings);
 
+  const router = useRouter();
   const [answers, setAnswers] = useState<AnswersMap>(initialAnswers);
   // Index into the VISIBLE section list (falls back to the nearest earlier
   // visible section when the resumed one is currently hidden by branching).
@@ -82,6 +96,7 @@ export function QuestionnaireRenderer({
   const [gateMissing, setGateMissing] = useState<string[]>([]);
   const [submitMissing, setSubmitMissing] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [switchingLanguage, setSwitchingLanguage] = useState(false);
 
   // Latest answers + dirty keys live in refs so the debounced flush always
   // sends current state without re-arming on every keystroke.
@@ -201,6 +216,41 @@ export function QuestionnaireRenderer({
     await goTo(sectionIndex + 1);
   }
 
+  // C6: language switch — flush pending answers first (so nothing typed is
+  // lost to the refresh), persist the choice server-side, then refresh so
+  // the server re-resolves every label in the new language. Answers are
+  // language-independent keys, so switching mid-flight is lossless (spec 07).
+  async function handleLanguageChange(next: string) {
+    if (next === language || switchingLanguage) return;
+    setSwitchingLanguage(true);
+    try {
+      const flushed = await flush();
+      if (!flushed) return;
+      const result = await setLanguageAction(next);
+      if (!result.ok) {
+        if (SESSION_EXPIRED_CODES.has(result.error.code)) {
+          setSessionExpired(true);
+          return;
+        }
+        setSaveError(result.error.message);
+        return;
+      }
+      router.refresh();
+    } finally {
+      setSwitchingLanguage(false);
+    }
+  }
+
+  // Only offered when the product declares more than one language (spec 07).
+  const languageSwitcher = showLanguageSwitcher(availableLanguages)
+    ? {
+        current: language,
+        options: availableLanguages,
+        disabled: switchingLanguage || saving,
+        onChange: (next: string) => void handleLanguageChange(next),
+      }
+    : undefined;
+
   async function handleSubmit() {
     setSubmitting(true);
     try {
@@ -265,6 +315,7 @@ export function QuestionnaireRenderer({
       <RendererShell
         title={labelFromKey(definition.titleKey)}
         progress={definition.settings.progressBar ? progress : null}
+        languageSwitcher={languageSwitcher}
       >
         <Card>
           <CardHeader>
@@ -311,6 +362,7 @@ export function QuestionnaireRenderer({
       title={labelFromKey(definition.titleKey)}
       progress={definition.settings.progressBar ? progress : null}
       stepper={{ sections, current: sectionIndex }}
+      languageSwitcher={languageSwitcher}
     >
       <Card>
         <CardHeader>
@@ -415,15 +467,51 @@ function SaveErrorBanner({
   );
 }
 
+interface LanguageSwitcherProps {
+  /** The active language — always visible as the selected option. */
+  current: string;
+  options: string[];
+  disabled: boolean;
+  onChange: (language: string) => void;
+}
+
+/**
+ * C6 language switcher: a labelled native select — keyboard operable and
+ * screen-reader friendly for free — styled with Ember tokens only, so
+ * product branding (F1 CSS variables) restyles it like the rest of the
+ * respondent surface. Each option shows the language's own name.
+ */
+function LanguageSwitcher({ current, options, disabled, onChange }: LanguageSwitcherProps) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-muted">
+      <span>Language</span>
+      <select
+        value={current}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-primary-bright disabled:opacity-50"
+      >
+        {options.map((tag) => (
+          <option key={tag} value={tag}>
+            {languageDisplayName(tag)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function RendererShell({
   title,
   progress = null,
   stepper,
+  languageSwitcher,
   children,
 }: {
   title: string;
   progress?: ProgressCounts | null;
   stepper?: { sections: Definition['sections']; current: number };
+  languageSwitcher?: LanguageSwitcherProps | undefined;
   children: React.ReactNode;
 }) {
   const pct =
@@ -433,7 +521,10 @@ function RendererShell({
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-4 px-4 py-8">
       <header className="flex flex-col gap-3">
-        <h1 className="text-xl font-semibold text-ink">{title}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold text-ink">{title}</h1>
+          {languageSwitcher ? <LanguageSwitcher {...languageSwitcher} /> : null}
+        </div>
         {progress ? (
           <div
             role="progressbar"

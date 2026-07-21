@@ -72,6 +72,8 @@ export default async function QuestionnairePage({
       initialAnswers={state.value.answers}
       resumeSectionIndex={state.value.resumeSectionIndex}
       strings={state.value.strings}
+      language={state.value.language}
+      availableLanguages={state.value.availableLanguages}
     />
   );
 }

@@ -523,6 +523,23 @@ describe('loadState translation resolution', () => {
     expect(result.value.language).toBe('en');
   });
 
+  it('prefers the language stored on the response row over the session (setLanguage persistence)', async () => {
+    const responses = new FakeResponses();
+    const translations = fakeTranslations();
+    const { service } = build({
+      responses,
+      translations,
+      sessions: new FakeSessions(fakeSession({ language: 'en' })),
+    });
+    await service.loadState(TOKEN);
+    await service.setLanguage(TOKEN, 'fr');
+    const result = await service.loadState(TOKEN);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.language).toBe('fr');
+    expect(translations.calls.at(-1)?.language).toBe('fr');
+  });
+
   it('returns empty strings (renderer humanize fallback) when resolution fails, without failing the load', async () => {
     const translations = {
       calls: [],
@@ -559,6 +576,77 @@ describe('loadState translation resolution', () => {
     if (!result.ok) return;
     expect(result.value.strings).toEqual({ 'test.title': 'Titre' });
     expect(result.value.strings['t.l']).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setLanguage (C6)
+// ---------------------------------------------------------------------------
+
+describe('setLanguage', () => {
+  it('persists an available language on the response row', async () => {
+    const responses = new FakeResponses();
+    const { service } = build({ responses });
+    await service.loadState(TOKEN);
+    const result = await service.setLanguage(TOKEN, 'fr');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.language).toBe('fr');
+    expect(responses.rows.get(SESSION_ID)?.language).toBe('fr');
+  });
+
+  it('never touches answers when switching (lossless, spec 07)', async () => {
+    const responses = new FakeResponses();
+    const { service } = build({ responses });
+    await service.loadState(TOKEN);
+    await service.saveAnswers(TOKEN, completeAnswers());
+    const before = responses.rows.get(SESSION_ID)?.answers;
+    const result = await service.setLanguage(TOKEN, 'fr');
+    expect(result.ok).toBe(true);
+    expect(responses.rows.get(SESSION_ID)?.answers).toEqual(before);
+  });
+
+  it('rejects a language the product does not offer', async () => {
+    const responses = new FakeResponses();
+    const { service } = build({ responses });
+    await service.loadState(TOKEN);
+    const result = await service.setLanguage(TOKEN, 'de');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('questionnaire/language_unavailable');
+    expect(result.error.detail).toEqual({
+      language: 'de',
+      availableLanguages: ['en', 'fr'],
+    });
+    expect(responses.rows.get(SESSION_ID)?.language).toBe('en'); // unchanged
+  });
+
+  it('rejects a malformed language tag before touching anything', async () => {
+    const { service } = build();
+    await service.loadState(TOKEN);
+    const result = await service.setLanguage(TOKEN, 'NOT A TAG!!');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('questionnaire/language_invalid');
+  });
+
+  it('refuses switching once submitted', async () => {
+    const { service } = build();
+    await service.loadState(TOKEN);
+    await service.saveAnswers(TOKEN, completeAnswers());
+    await service.submit(TOKEN);
+    const result = await service.setLanguage(TOKEN, 'fr');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('questionnaire/already_submitted');
+  });
+
+  it('passes access errors through untouched', async () => {
+    const { service } = build();
+    const result = await service.setLanguage('bogus', 'fr');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('respondent_access/session_invalid');
   });
 });
 
