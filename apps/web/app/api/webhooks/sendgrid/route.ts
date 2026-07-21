@@ -19,6 +19,7 @@ import {
 import { getNotificationService } from '@assessify/services';
 
 import { getServerEnv } from '@/lib/env';
+import { getWebInvitationService } from '@/lib/invitations';
 
 // node:crypto signature verification — never run this on the edge runtime.
 export const runtime = 'nodejs';
@@ -64,6 +65,24 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ error: result.error.code }, { status: 500 });
     }
     if (result.value.changed) applied += 1;
+
+    // Spec 13 delivery-failure handling: a hard bounce on an invitation is
+    // an order-blocking problem — drive the order to email_error via the
+    // invitation service (order state machine + audit + admin alert).
+    // Triggered whenever the row shows `bounced` (not only on `changed`) so
+    // a redelivery after a mid-batch failure still lands the transition;
+    // recordInvitationBounce is idempotent, so replays are no-ops.
+    const bounce = result.value.notification;
+    if (bounce?.kind === 'invitation' && bounce.status === 'bounced' && bounce.orderId !== null) {
+      const outcome = await getWebInvitationService().recordInvitationBounce({
+        orderId: bounce.orderId,
+        notificationId: bounce.id,
+        sessionId: bounce.sessionId,
+      });
+      if (!outcome.ok) {
+        return NextResponse.json({ error: outcome.error.code }, { status: 500 });
+      }
+    }
   }
 
   return NextResponse.json({ received: events.length, applied });

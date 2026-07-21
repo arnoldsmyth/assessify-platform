@@ -45,6 +45,9 @@ const EXPECTED_LEGAL: Expected[] = [
   { from: 'payment_error', event: 'retry_payment', to: 'pending' },
   { from: 'approved', event: 'invitations_sent', to: 'sent' },
   { from: 'approved', event: 'invitation_failed', to: 'email_error' },
+  // Spec 13 delivery-failure handling: an invitation hard bounce lands after
+  // dispatch already moved the order to `sent` — it still forces email_error.
+  { from: 'sent', event: 'invitation_failed', to: 'email_error' },
   { from: 'email_error', event: 'retry_email', to: 'approved' },
   { from: 'sent', event: 'completion_rule_met', to: 'processing_report' },
   { from: 'processing_report', event: 'reports_ready', to: 'completed' },
@@ -66,11 +69,11 @@ function expectedFor(from: OrderStatus, event: OrderEvent): Expected | undefined
 }
 
 describe('order transition table (spec 06, normative)', () => {
-  it('has exactly the 29 legal (from, event) pairs and no duplicates', () => {
-    expect(EXPECTED_LEGAL).toHaveLength(29);
-    expect(ORDER_TRANSITIONS).toHaveLength(29);
+  it('has exactly the 30 legal (from, event) pairs and no duplicates', () => {
+    expect(EXPECTED_LEGAL).toHaveLength(30);
+    expect(ORDER_TRANSITIONS).toHaveLength(30);
     const keys = ORDER_TRANSITIONS.map((rule) => `${rule.from}→${rule.event}`);
-    expect(new Set(keys).size).toBe(29);
+    expect(new Set(keys).size).toBe(30);
   });
 
   it.each(EXPECTED_LEGAL)('allows $from ──$event──▶ $to', ({ from, event, to }) => {

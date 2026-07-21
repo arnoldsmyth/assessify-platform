@@ -34,6 +34,34 @@ export const respondentPinSchema = z
   .trim()
   .regex(/^\d{6}$/, `PIN must be exactly ${RESPONDENT_PIN_LENGTH} digits`);
 
+// Minimal WebCrypto surface — this package compiles with lib ES2022 only
+// (same pattern as uuid.ts).
+declare const crypto: { getRandomValues<T extends Uint8Array>(array: T): T };
+
+/** Largest multiple of 10^6 that fits in a u32 — rejection-sampling bound. */
+const PIN_SAMPLE_LIMIT = 4_294_000_000;
+
+/**
+ * Cryptographically random 6-digit respondent PIN (spec 05: generated per
+ * session at invitation dispatch, bcrypt-hashed at rest, plaintext sent ONLY
+ * in the invitation email). Uniform over 000000–999999 via rejection
+ * sampling, so no digit sequence is likelier than another.
+ */
+export function generateRespondentPin(): string {
+  const buffer = new Uint8Array(4);
+  for (;;) {
+    crypto.getRandomValues(buffer);
+    const value =
+      ((buffer[0] ?? 0) << 24 >>> 0) +
+      ((buffer[1] ?? 0) << 16) +
+      ((buffer[2] ?? 0) << 8) +
+      (buffer[3] ?? 0);
+    if (value < PIN_SAMPLE_LIMIT) {
+      return String(value % 1_000_000).padStart(RESPONDENT_PIN_LENGTH, '0');
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Lockout policy (spec 05: "5 failed attempts → 15-minute lockout")
 // ---------------------------------------------------------------------------

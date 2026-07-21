@@ -112,6 +112,12 @@ export const ORDER_TRANSITIONS: readonly OrderTransitionRule[] = [
   { from: 'pending', event: 'payment_failed', to: 'payment_error', actors: SYSTEM_ONLY },
   { from: 'payment_error', event: 'retry_payment', to: 'pending', actors: ADMIN_ONLY },
   { from: 'approved', event: 'invitation_failed', to: 'email_error', actors: SYSTEM_ONLY },
+  // Spec 13 delivery-failure handling: a hard bounce on an invitation email
+  // arrives AFTER dispatch moved the order to `sent` (order is `sent` when
+  // ≥1 invite sent) — the bounce still drives the order to email_error ("bad
+  // address is an order-blocking problem"). retry_email returns to approved;
+  // re-dispatch skips already-invited sessions.
+  { from: 'sent', event: 'invitation_failed', to: 'email_error', actors: SYSTEM_ONLY },
   { from: 'email_error', event: 'retry_email', to: 'approved', actors: ADMIN_ONLY },
   { from: 'processing_report', event: 'scoring_failed', to: 'scoring_error', actors: SYSTEM_ONLY },
   { from: 'scoring_error', event: 'retry_scoring', to: 'processing_report', actors: ADMIN_ONLY },

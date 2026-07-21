@@ -63,12 +63,39 @@ export const scoringDispatchPayloadSchema = z.object({
   jobId: z.string().uuid(),
 });
 
+/**
+ * Invitation dispatch/resend for one order (D5 — spec 06/05/13). Enqueued by
+ * the admin "send invitations" action (order `approved`) or a resend action;
+ * the worker processor hands the payload to the invitation service, which
+ * generates+hashes PINs, sends invitation emails through the notification
+ * service, and drives the order state machine (`invitations_sent` /
+ * `invitation_failed`). The payload carries ids only — never respondent PII
+ * and never a PIN.
+ */
+export const invitationsDispatchPayloadSchema = z.object({
+  orderId: z.string().uuid(),
+  /**
+   * Restrict the run to specific sessions (per-session resend). Omitted =
+   * every eligible session on the order.
+   */
+  sessionIds: z.array(z.string().uuid()).min(1).max(500).optional(),
+  /**
+   * Resend mode: target already-invited sessions and regenerate their PINs
+   * (spec 05 "same token, regenerated PIN"). Default is first dispatch,
+   * which skips already-invited sessions (idempotent).
+   */
+  resend: z.boolean().default(false),
+  /** Admin user who requested the run — audit context only (worker runs as system). */
+  requestedByUserId: z.string().uuid().nullable().default(null),
+});
+
 /** Single source of truth mapping job name → payload schema. */
 export const jobPayloadSchemas = {
   'health.ping': healthPingPayloadSchema,
   'maintenance.heartbeat': heartbeatPayloadSchema,
   'notifications.send': notificationSendPayloadSchema,
   'scoring.dispatch': scoringDispatchPayloadSchema,
+  'invitations.dispatch': invitationsDispatchPayloadSchema,
 } as const;
 
 export type JobName = keyof typeof jobPayloadSchemas;

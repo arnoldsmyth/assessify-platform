@@ -27,6 +27,38 @@ const envSchema = z
      * console mailer (dev only — emails are printed, not sent).
      */
     SENDGRID_API_KEY: z.string().min(1).optional(),
+    /**
+     * Base domains serving `{product-slug}.` subdomains (spec 11) — same
+     * variable the web app validates. Invitation links (D5) are built on the
+     * FIRST entry, so keep the public production domain first.
+     */
+    PRODUCT_SLUG_BASE_DOMAINS: z
+      .string()
+      .transform((value) =>
+        value
+          .split(',')
+          .map((host) => host.trim().toLowerCase())
+          .filter((host) => host.length > 0)
+      )
+      .pipe(z.array(z.string().min(1)).min(1))
+      .default('assessify.ie,localhost'),
+    /** Platform sender identity (spec 13) — fallback when a product has no branding.emailFrom, and the error_alert sender. */
+    MAIL_FROM_NAME: z.string().min(1).default('Assessify'),
+    MAIL_FROM_ADDRESS: z.string().email().default('no-reply@assessify.local'),
+    /**
+     * Comma-separated super-admin addresses for `error_alert` mail (spec 06
+     * error states). Optional: unset skips alert emails (audit still records).
+     */
+    ERROR_ALERT_EMAILS: z
+      .string()
+      .transform((value) =>
+        value
+          .split(',')
+          .map((address) => address.trim())
+          .filter((address) => address.length > 0)
+      )
+      .pipe(z.array(z.string().email()))
+      .optional(),
   })
   .refine((env) => env.VALKEY_URL !== undefined || env.REDIS_URL !== undefined, {
     message:
@@ -38,6 +70,10 @@ export interface WorkerEnv {
   concurrency: number;
   databaseUrl?: string;
   sendgridApiKey?: string;
+  /** First entry is the primary base domain for invitation links (D5). */
+  slugBaseDomains: string[];
+  mailFrom: { name: string; address: string };
+  errorAlertEmails?: string[];
 }
 
 export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEnv {
@@ -59,6 +95,14 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     ...(parsed.data.DATABASE_URL !== undefined && { databaseUrl: parsed.data.DATABASE_URL }),
     ...(parsed.data.SENDGRID_API_KEY !== undefined && {
       sendgridApiKey: parsed.data.SENDGRID_API_KEY,
+    }),
+    slugBaseDomains: parsed.data.PRODUCT_SLUG_BASE_DOMAINS,
+    mailFrom: {
+      name: parsed.data.MAIL_FROM_NAME,
+      address: parsed.data.MAIL_FROM_ADDRESS,
+    },
+    ...(parsed.data.ERROR_ALERT_EMAILS !== undefined && {
+      errorAlertEmails: parsed.data.ERROR_ALERT_EMAILS,
     }),
   };
 }

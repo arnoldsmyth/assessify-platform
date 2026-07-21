@@ -44,6 +44,28 @@ const serverEnvSchema = z.object({
   /** Platform sender identity for auth/system mail (spec 13; per-product senders come from product branding). */
   MAIL_FROM_NAME: z.string().min(1).default('Assessify'),
   MAIL_FROM_ADDRESS: z.string().email().default('no-reply@assessify.local'),
+  /**
+   * Queue connection (BullMQ on DO Valkey) for enqueueing background jobs
+   * from server actions (D5 invitation dispatch/resend). Optional: actions
+   * that need the queue return a typed error until one is configured.
+   */
+  VALKEY_URL: z.string().regex(/^rediss?:\/\//).optional(),
+  /** Redis-compatible fallback name (local docker, CI). */
+  REDIS_URL: z.string().regex(/^rediss?:\/\//).optional(),
+  /**
+   * Comma-separated super-admin addresses for `error_alert` mail (spec 06
+   * error states). Optional: unset skips alert emails (audit still records).
+   */
+  ERROR_ALERT_EMAILS: z
+    .string()
+    .transform((value) =>
+      value
+        .split(',')
+        .map((address) => address.trim())
+        .filter((address) => address.length > 0)
+    )
+    .pipe(z.array(z.string().email()))
+    .optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   /**
    * Tenant resolution (spec 11 / F1). Hostnames serving the Assessify admin

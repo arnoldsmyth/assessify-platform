@@ -68,6 +68,11 @@ export {
   type ScoringJobRepository,
 } from './postgres/scoring-jobs';
 export {
+  createInvitationSessionRepository,
+  type InvitationSessionRecord,
+  type InvitationSessionRepository,
+} from './postgres/invitation-sessions';
+export {
   createInMemoryPinAttemptStore,
   type PinAttemptState,
   type PinAttemptStore,

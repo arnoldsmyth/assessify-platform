@@ -18,7 +18,12 @@
  */
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { getHealth, getNotificationService, getScoringService } from '@assessify/services';
+import {
+  getHealth,
+  getInvitationService,
+  getNotificationService,
+  getScoringService,
+} from '@assessify/services';
 import type { Mailer } from '@assessify/adapters';
 import {
   ASSESSIFY_QUEUE_NAME,
@@ -58,8 +63,22 @@ async function main(): Promise<void> {
     ? getNotificationService({ mailer, queue: jobQueue })
     : undefined;
   if (!env.databaseUrl) {
-    console.log('[worker] DATABASE_URL not set — notifications.send jobs will fail');
+    console.log(
+      '[worker] DATABASE_URL not set — notifications.send/invitations.dispatch jobs will fail'
+    );
   }
+  // Invitation dispatch (D5): links are built on the primary slug base
+  // domain; the platform sender backs products without branding.emailFrom.
+  const invitations = env.databaseUrl
+    ? getInvitationService(
+        { queue: jobQueue },
+        {
+          slugBaseDomain: env.slugBaseDomains[0] ?? 'assessify.ie',
+          platformSender: env.mailFrom,
+          ...(env.errorAlertEmails !== undefined && { alertRecipients: env.errorAlertEmails }),
+        }
+      )
+    : undefined;
 
   // Scoring (E1): the internal sync engine ships with the worker; the E2
   // async-external wrapper joins this map when it lands. `queue` lets the
@@ -78,6 +97,7 @@ async function main(): Promise<void> {
     health: { getHealth },
     notifications: { service: notifications },
     scoring: { service: scoring },
+    invitations: { service: invitations },
   });
   const worker = new Worker(ASSESSIFY_QUEUE_NAME, (job) => dispatchJob(registry, job), {
     connection,
