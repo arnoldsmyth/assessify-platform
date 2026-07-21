@@ -17,7 +17,8 @@
     "./payment/offline": "./src/payment/providers/offline.ts",
     "./payment/memory": "./src/payment/providers/memory.ts",
     "./scoring/internal-sync": "./src/scoring/providers/internal-sync.ts",
-    "./scoring/memory": "./src/scoring/providers/memory.ts"
+    "./scoring/memory": "./src/scoring/providers/memory.ts",
+    "./scoring/prologic": "./src/scoring/providers/prologic.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

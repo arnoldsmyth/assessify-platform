@@ -1,6 +1,7 @@
 import {
   createAuditLogRepository,
   createQuestionnaireVersionRepository,
+  createRespondentRepository,
   createRespondentSessionRepository,
   createResponseRepository,
   createScoringJobRepository,
@@ -51,6 +52,7 @@ export function getScoringService(composition: ScoringServiceComposition = {}): 
     responses: createResponseRepository(connectionString),
     versions: createQuestionnaireVersionRepository(db),
     products: new DrizzleProductRepository(db),
+    respondents: createRespondentRepository(db),
     orderService: getOrderService(),
     audit: createAuditService({ auditLogRepository: createAuditLogRepository(db) }),
     ...composition,

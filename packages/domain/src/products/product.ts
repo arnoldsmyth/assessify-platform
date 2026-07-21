@@ -1,7 +1,10 @@
 import { z } from 'zod';
 
 import {
+  externalScoringProviderSchema,
   internalScoringDefinitionSchema,
+  prologicScopeSchema,
+  prologicToolMapSchema,
   scoringModeSchema,
   scoringRetrievalModeSchema,
 } from '../scoring';
@@ -75,6 +78,28 @@ export const scoringConfigSchema = z
     engineKey: z.string().trim().min(1).max(100).optional(),
     /** Declarative definition for the internal scale-sum engine (spec 08). */
     definition: internalScoringDefinitionSchema.optional(),
+    /**
+     * Concrete `async_external` provider (E2). Selects the adapter wired at
+     * the composition root and marks the config as needing the provider's
+     * documented respondent-identity payload (spec 00 PII exception). When
+     * set, `endpoint` is optional — the provider's base URL comes from env.
+     */
+    provider: externalScoringProviderSchema.optional(),
+    /**
+     * Pro-Logic per-PRODUCT access code (`ac_xxxx`, owner 2026-07-21) —
+     * passed on every score call; scopes must be within its allowance.
+     */
+    accessCode: z.string().trim().min(1).max(100).optional(),
+    /** Pro-Logic scopes to score for this product (drive required tools). */
+    scopes: z.array(prologicScopeSchema).min(1).optional(),
+    /** questionnaire question-key → Pro-Logic (tool, 1-based q) mapping. */
+    toolMap: prologicToolMapSchema.optional(),
+    /**
+     * Explicit Pro-Logic norms selector (`male | female | pooled |
+     * <norm_set_id>`). We store no respondent gender, so scopes touching
+     * gender-split norms MUST set this per product.
+     */
+    norms: z.string().trim().min(1).max(100).optional(),
     endpoint: z.string().trim().url().optional(),
     auth: z
       .object({
@@ -90,12 +115,42 @@ export const scoringConfigSchema = z
   })
   .strict()
   .superRefine((config, ctx) => {
-    if (config.mode === 'async_external' && !config.endpoint) {
+    if (config.mode === 'async_external' && !config.endpoint && !config.provider) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['endpoint'],
-        message: 'An endpoint is required for async_external scoring',
+        message: 'An endpoint (or a known provider) is required for async_external scoring',
       });
+    }
+    if (config.provider !== undefined && config.mode !== 'async_external') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['provider'],
+        message: 'A scoring provider requires mode "async_external"',
+      });
+    }
+    if (config.provider === 'prologic') {
+      if (!config.accessCode) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['accessCode'],
+          message: 'Pro-Logic products need their per-product access code (ac_xxxx)',
+        });
+      }
+      if (!config.scopes || config.scopes.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['scopes'],
+          message: 'Pro-Logic products must configure at least one scoring scope',
+        });
+      }
+      if (!config.toolMap || Object.keys(config.toolMap).length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['toolMap'],
+          message: 'Pro-Logic products must map question keys onto tools (toolMap)',
+        });
+      }
     }
   });
 

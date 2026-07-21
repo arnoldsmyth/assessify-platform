@@ -41,6 +41,12 @@ const serverEnvSchema = z.object({
    * answers 503 until it is configured — never verify-less.
    */
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  /**
+   * Pro-Logic webhook secret (E2): HMAC-SHA256 key verifying the raw-body
+   * `X-Signature` on /api/webhooks/prologic. Optional: the route answers 503
+   * until it is configured — never verify-less.
+   */
+  PROLOGIC_WEBHOOK_SECRET: z.string().min(1).optional(),
   /** Platform sender identity for auth/system mail (spec 13; per-product senders come from product branding). */
   MAIL_FROM_NAME: z.string().min(1).default('Assessify'),
   MAIL_FROM_ADDRESS: z.string().email().default('no-reply@assessify.local'),

@@ -25,7 +25,7 @@ import {
   getReminderService,
   getScoringService,
 } from '@assessify/services';
-import type { Mailer } from '@assessify/adapters';
+import type { Mailer, ScoringAdapter } from '@assessify/adapters';
 import {
   ASSESSIFY_QUEUE_NAME,
   BullMqJobQueue,
@@ -34,6 +34,7 @@ import {
 import { createConsoleMailer } from '@assessify/adapters/mailer/console';
 import { createSendGridMailer } from '@assessify/adapters/mailer/sendgrid';
 import { createInternalSyncScoringAdapter } from '@assessify/adapters/scoring/internal-sync';
+import { createPrologicScoringAdapter } from '@assessify/adapters/scoring/prologic';
 import { loadWorkerEnv } from './env';
 import { dispatchJob } from './dispatch';
 import { createProcessorRegistry } from './processors';
@@ -93,13 +94,35 @@ async function main(): Promise<void> {
       )
     : undefined;
 
-  // Scoring (E1): the internal sync engine ships with the worker; the E2
-  // async-external wrapper joins this map when it lands. `queue` lets the
+  // Scoring (E1 + E2): the internal sync engine ships with the worker; the
+  // Pro-Logic adapter serves `async_external`. Without an API key, external
+  // jobs fail RETRYABLY (never permanently parked) so they recover as soon
+  // as PROLOGIC_API_KEY lands and the queue retries. `queue` lets the
   // service re-enqueue retries through the same adapter services use.
+  const prologic: ScoringAdapter = env.prologicApiKey
+    ? createPrologicScoringAdapter({ apiKey: env.prologicApiKey, baseUrl: env.prologicApiUrl })
+    : {
+        mode: 'async_external',
+        async score() {
+          return {
+            kind: 'failed',
+            retryable: true,
+            error: 'prologic_not_configured: set PROLOGIC_API_KEY (and PROLOGIC_API_URL) on the worker',
+          };
+        },
+      };
+  if (!env.prologicApiKey) {
+    console.log(
+      '[worker] PROLOGIC_API_KEY not set — async_external scoring jobs will fail retryably'
+    );
+  }
   const scoring = env.databaseUrl
     ? getScoringService({
         queue: jobQueue,
-        adapters: { sync_internal: createInternalSyncScoringAdapter() },
+        adapters: {
+          sync_internal: createInternalSyncScoringAdapter(),
+          async_external: prologic,
+        },
       })
     : undefined;
   if (!env.databaseUrl) {

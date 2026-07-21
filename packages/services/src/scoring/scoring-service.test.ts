@@ -12,7 +12,11 @@ import {
 } from '@assessify/domain';
 import type { EnqueuedJob, JobQueue } from '@assessify/adapters';
 import { createMemoryScoringAdapter } from '@assessify/adapters/scoring/memory';
-import type { QuestionnaireVersion, ScoringJobCreate } from '@assessify/repositories';
+import type {
+  QuestionnaireVersion,
+  RespondentIdentity,
+  ScoringJobCreate,
+} from '@assessify/repositories';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuditService } from '../audit';
@@ -122,6 +126,30 @@ class FakeScoringJobs {
   }
   async listStuck(): Promise<ScoringJob[]> {
     return [];
+  }
+  async setExternalRef(
+    id: string,
+    ref: { provider: string; assessmentId: string }
+  ): Promise<ScoringJob | null> {
+    const row = this.rows.get(id);
+    if (!row || row.status === 'failed') return null;
+    const next = {
+      ...row,
+      requestPayload: { ...(row.requestPayload ?? {}), externalRef: { ...ref } },
+    };
+    this.rows.set(id, next);
+    return next;
+  }
+  async findByExternalRef(provider: string, assessmentId: string): Promise<ScoringJob | null> {
+    const matches = [...this.rows.values()]
+      .filter((job) => {
+        const ref = job.requestPayload?.['externalRef'] as
+          | { provider?: string; assessmentId?: string }
+          | undefined;
+        return ref?.provider === provider && ref?.assessmentId === assessmentId;
+      })
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return matches[0] ?? null;
   }
 }
 
@@ -268,6 +296,7 @@ interface BuildOverrides {
   transition?: ReturnType<typeof vi.fn>;
   queue?: ReturnType<typeof fakeQueue> | undefined;
   adapter?: ReturnType<typeof createMemoryScoringAdapter> | undefined;
+  respondents?: { findById: (id: string) => Promise<RespondentIdentity | null> };
 }
 
 function build(overrides: BuildOverrides = {}) {
@@ -296,6 +325,7 @@ function build(overrides: BuildOverrides = {}) {
     audit,
     queue,
     adapters: adapter ? { [adapter.mode]: adapter } : {},
+    ...(overrides.respondents ? { respondents: overrides.respondents } : {}),
     now: () => NOW,
     generateId: () => JOB_ID,
   });
@@ -591,6 +621,166 @@ describe('applyScores', () => {
     const replay = await service.applyScores(JOB_ID, { dimensions: { drive: 999 } });
     expect(replay.ok).toBe(true);
     expect(sessions.scores).toEqual({ dimensions: { drive: 6 } }); // untouched
+  });
+});
+
+// ---------------------------------------------------------------------------
+// External providers (E2): respondent identity + engine-side references
+// ---------------------------------------------------------------------------
+
+const RESPONDENT_ID = '01890000-0000-7000-8000-00000000cafe';
+const ASSESSMENT_ID = '01HZXKQ8W9GYV2M4T6R8PLGSCB';
+const EXTERNAL_REF = { provider: 'prologic', assessmentId: ASSESSMENT_ID };
+
+const prologicConfig = {
+  mode: 'async_external',
+  provider: 'prologic',
+  accessCode: 'ac_test123',
+  scopes: ['mcs'],
+  toolMap: { person: { q1: 1, q2: 2 } },
+};
+
+function respondentRow(overrides: Partial<RespondentIdentity> = {}): RespondentIdentity {
+  return {
+    id: RESPONDENT_ID,
+    email: 'jane@example.com',
+    firstName: 'Jane',
+    lastName: 'Doe',
+    language: 'en',
+    ...overrides,
+  };
+}
+
+function externalBuild(overrides: BuildOverrides = {}) {
+  return {
+    adapter: createMemoryScoringAdapter({ mode: 'async_external' }),
+    sessions: new FakeSessions(fakeSession({ respondentId: RESPONDENT_ID })),
+    scoringConfig: prologicConfig,
+    respondents: { findById: async (id: string) => (id === RESPONDENT_ID ? respondentRow() : null) },
+    ...overrides,
+  };
+}
+
+describe('processJob — external provider identity', () => {
+  it('loads respondent identity onto the input; the snapshot stays PII-free', async () => {
+    const overrides = externalBuild();
+    overrides.adapter.queueOutcome({
+      kind: 'sync_result',
+      scores: { dimensions: { 'mcs.m.drive': 72.5 } },
+      externalRef: EXTERNAL_REF,
+    });
+    const { service, scoringJobs } = await dispatched(overrides);
+    const result = await service.processJob(JOB_ID);
+    expect(result.ok).toBe(true);
+
+    const input = overrides.adapter.scored[0]!;
+    // external_id contract: respondents.id — the stable royalty anchor.
+    expect(input.respondent).toEqual({
+      id: RESPONDENT_ID,
+      firstname: 'Jane',
+      lastname: 'Doe',
+      email: 'jane@example.com',
+    });
+    // Identity is for the adapter call ONLY — never persisted on the job.
+    const snapshot = JSON.stringify(scoringJobs.rows.get(JOB_ID)?.requestPayload);
+    expect(snapshot).not.toContain('Jane');
+    expect(snapshot).not.toContain('jane@example.com');
+  });
+
+  it('fails permanently when the session has no respondent', async () => {
+    const overrides = externalBuild({ sessions: new FakeSessions(fakeSession()) });
+    const { service, scoringJobs } = await dispatched(overrides);
+    const result = await service.processJob(JOB_ID);
+    expect(result.ok).toBe(false);
+    expect(scoringJobs.rows.get(JOB_ID)?.error).toBe('respondent_identity_missing:session');
+    expect(overrides.adapter.scored).toHaveLength(0);
+  });
+
+  it('fails permanently when identity fields were PII-deleted (names only, no values)', async () => {
+    const overrides = externalBuild({
+      respondents: { findById: async () => respondentRow({ email: null }) },
+    });
+    const { service, scoringJobs } = await dispatched(overrides);
+    const result = await service.processJob(JOB_ID);
+    expect(result.ok).toBe(false);
+    expect(scoringJobs.rows.get(JOB_ID)?.error).toBe('respondent_identity_missing:fields');
+  });
+
+  it('fails permanently when composed without a respondents repository', async () => {
+    const overrides = externalBuild();
+    delete (overrides as { respondents?: unknown }).respondents;
+    const { service, scoringJobs } = await dispatched(overrides);
+    const result = await service.processJob(JOB_ID);
+    expect(result.ok).toBe(false);
+    expect(scoringJobs.rows.get(JOB_ID)?.error).toBe('respondent_repository_unavailable');
+  });
+
+  it('persists the outcome externalRef on the job — including for retryable failures', async () => {
+    const overrides = externalBuild();
+    overrides.adapter.queueOutcome({
+      kind: 'failed',
+      retryable: true,
+      error: 'prologic_score_http_500',
+      externalRef: EXTERNAL_REF,
+    });
+    const { service, scoringJobs } = await dispatched(overrides);
+    const result = await service.processJob(JOB_ID);
+    expect(result.ok).toBe(false);
+    expect(scoringJobs.rows.get(JOB_ID)?.requestPayload?.['externalRef']).toEqual(EXTERNAL_REF);
+    expect(scoringJobs.rows.get(JOB_ID)?.status).toBe('dispatched'); // still retryable
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyExternalScores (E2 webhook seam)
+// ---------------------------------------------------------------------------
+
+describe('applyExternalScores', () => {
+  async function scoredExternally() {
+    const overrides = externalBuild();
+    overrides.adapter.queueOutcome({
+      kind: 'failed',
+      retryable: true,
+      error: 'prologic_score_http_500', // engine scored, our read failed
+      externalRef: EXTERNAL_REF,
+    });
+    const built = await dispatched(overrides);
+    await built.service.processJob(JOB_ID);
+    return built;
+  }
+
+  it('resolves the job by engine reference and applies the scores', async () => {
+    const { service, scoringJobs, sessions } = await scoredExternally();
+    const result = await service.applyExternalScores(EXTERNAL_REF, {
+      dimensions: { 'mcs.m.drive': 72.5 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual({ jobId: JOB_ID, sessionId: SESSION_ID, status: 'completed' });
+    expect(scoringJobs.rows.get(JOB_ID)?.status).toBe('completed');
+    expect(sessions.session?.status).toBe('scored');
+  });
+
+  it('returns external_ref_unknown (non-permanent) for unmatched references', async () => {
+    const { service } = await scoredExternally();
+    const result = await service.applyExternalScores(
+      { provider: 'prologic', assessmentId: 'unknown' },
+      { dimensions: {} }
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('scoring/external_ref_unknown');
+    expect(result.error.detail?.['permanent']).toBeUndefined(); // webhook redelivery may win
+  });
+
+  it('is replay-tolerant: a second webhook delivery is a no-op', async () => {
+    const { service, sessions } = await scoredExternally();
+    await service.applyExternalScores(EXTERNAL_REF, { dimensions: { 'mcs.m.drive': 72.5 } });
+    const replay = await service.applyExternalScores(EXTERNAL_REF, {
+      dimensions: { 'mcs.m.drive': 1 },
+    });
+    expect(replay.ok).toBe(true);
+    expect(sessions.scores).toEqual({ dimensions: { 'mcs.m.drive': 72.5 } }); // untouched
   });
 });
 
