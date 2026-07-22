@@ -92,6 +92,113 @@ export const notificationRequestSchema = z
 export type NotificationRequest = z.infer<typeof notificationRequestSchema>;
 export type NotificationRequestInput = z.input<typeof notificationRequestSchema>;
 
+// ---------------------------------------------------------------------------
+// Completion notification policy (spec 13 — "Completion notification policy
+// (resolved, not boolean)")
+// ---------------------------------------------------------------------------
+
+/**
+ * Who a completion-time notification can address (spec 13): the client's
+ * admin contact(s), the respondent themself, or named third parties (HR
+ * contact, manager — their emails stored on the order's policy override).
+ */
+export const completionRecipientTypes = ['client', 'respondent', 'third_party'] as const;
+export const completionRecipientTypeSchema = z.enum(completionRecipientTypes);
+export type CompletionRecipientType = z.infer<typeof completionRecipientTypeSchema>;
+
+/**
+ * One recipient rule of the spec-13 policy object
+ * `{ recipients: [{ type, emails?, includeReportLink }] }`.
+ *
+ * - `respondent`: addressed via the session's respondent record — `emails`
+ *   is ignored for this type (the platform never mails a "respondent" at an
+ *   address that isn't the session's own).
+ * - `client`: explicit `emails` win; without them the client's billing email
+ *   is the fallback contact (no dedicated client-contact column exists yet).
+ * - `third_party`: `emails` is REQUIRED (there is nowhere else to look).
+ * - `includeReportLink` defaults to false (opt in): only the respondent's own
+ *   mail may ever carry the `/a/{token}/report` link — the token is the
+ *   respondent's access credential (spec 05), so client/third-party notices
+ *   never include it regardless of this flag.
+ */
+export const completionNotificationRecipientSchema = z
+  .object({
+    type: completionRecipientTypeSchema,
+    emails: z.array(z.string().trim().email()).max(20).optional(),
+    includeReportLink: z.boolean().default(false),
+  })
+  .strict()
+  .superRefine((recipient, ctx) => {
+    if (recipient.type === 'third_party' && (recipient.emails?.length ?? 0) === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['emails'],
+        message: 'third_party recipients must name at least one email address',
+      });
+    }
+  });
+export type CompletionNotificationRecipient = z.infer<
+  typeof completionNotificationRecipientSchema
+>;
+
+/** The resolved policy object (spec 13). An empty recipients list = silence. */
+export const completionNotificationPolicySchema = z
+  .object({
+    recipients: z.array(completionNotificationRecipientSchema).max(20),
+  })
+  .strict();
+export type CompletionNotificationPolicy = z.infer<typeof completionNotificationPolicySchema>;
+
+/**
+ * Platform default when no layer configures completion notifications: tell
+ * the respondent their report is ready, with their own report link — the
+ * core promise of completing an assessment — and send no client mail (a
+ * client that wants completion notices configures them explicitly).
+ */
+export const DEFAULT_COMPLETION_NOTIFICATION_POLICY: CompletionNotificationPolicy = Object.freeze({
+  recipients: [Object.freeze({ type: 'respondent' as const, includeReportLink: true })],
+});
+
+/** Which precedence layer supplied the resolved policy (audit snapshot). */
+export type CompletionPolicySource = 'order' | 'client' | 'product' | 'default';
+
+export interface ResolvedCompletionNotificationPolicy {
+  policy: CompletionNotificationPolicy;
+  source: CompletionPolicySource;
+}
+
+/**
+ * Resolve the completion notification policy for one order (spec 13):
+ *
+ *   `orders.notification_policy.completion`
+ *     → `clients.notification_overrides.completion`
+ *       → `products.notification_defaults.completion`
+ *         → {@link DEFAULT_COMPLETION_NOTIFICATION_POLICY}.
+ *
+ * Rides the existing jsonb columns under the `completion` key, mirroring the
+ * `reportRelease` key convention (`resolveReportReleasePolicy`, spec 09). A
+ * layer whose value fails validation is skipped — a malformed override can
+ * only fall back, never break notification sends.
+ */
+export function resolveCompletionNotificationPolicy(
+  orderPolicy: Record<string, unknown> | null,
+  clientOverrides: Record<string, unknown> | null,
+  productDefaults: Record<string, unknown> | null
+): ResolvedCompletionNotificationPolicy {
+  const layers: ReadonlyArray<
+    readonly [Exclude<CompletionPolicySource, 'default'>, Record<string, unknown> | null]
+  > = [
+    ['order', orderPolicy],
+    ['client', clientOverrides],
+    ['product', productDefaults],
+  ];
+  for (const [source, config] of layers) {
+    const parsed = completionNotificationPolicySchema.safeParse(config?.['completion']);
+    if (parsed.success) return { policy: parsed.data, source };
+  }
+  return { policy: DEFAULT_COMPLETION_NOTIFICATION_POLICY, source: 'default' };
+}
+
 /** One `notification_log` row mapped to the domain (spec 04 data model). */
 export const notificationLogEntrySchema = z.object({
   id: z.string().uuid(),

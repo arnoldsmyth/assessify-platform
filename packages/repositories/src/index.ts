@@ -34,7 +34,10 @@ export {
   type OrderStatusPatch,
 } from './postgres/orders';
 export {
+  createClientNotificationRepository,
   createClientRepository,
+  type ClientNotificationProfile,
+  type ClientNotificationRepository,
   type ClientRepository,
   type ClientSummary,
 } from './postgres/clients';

@@ -69,6 +69,11 @@ function createFakeLogRepo() {
     async listByStatuses(statuses, limit) {
       return [...rows.values()].filter((entry) => statuses.includes(entry.status)).slice(0, limit);
     },
+    async listByKindAndSession(kind, sessionId) {
+      return [...rows.values()].filter(
+        (entry) => entry.kind === kind && entry.sessionId === sessionId
+      );
+    },
   };
   return {
     repo,

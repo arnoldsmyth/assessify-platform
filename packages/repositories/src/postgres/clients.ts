@@ -1,5 +1,5 @@
 import { clients, type Database } from '@assessify/db';
-import { asc, inArray } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 
 /**
  * Read-only data access for `clients` (spec 04 parties). The order wizard
@@ -17,6 +17,30 @@ export interface ClientSummary {
   clientNumber: number;
   name: string;
   defaultCurrency: string;
+}
+
+/**
+ * The client projection completion notifications need (E6 — spec 13):
+ * the policy-override jsonb plus the client's contact address. The billing
+ * email doubles as the client-admin contact until a dedicated contact column
+ * exists. PII: `billingEmail` must never appear in logs or audit detail.
+ */
+export interface ClientNotificationProfile {
+  id: string;
+  name: string;
+  billingEmail: string | null;
+  /** `clients.notification_overrides` jsonb — spec 13 precedence layer 2. */
+  notificationOverrides: Record<string, unknown> | null;
+}
+
+/**
+ * Deliberately separate from {@link ClientRepository} (whose picker/display
+ * projections omit contact PII): completion notification dispatch is the one
+ * flow that needs the override jsonb together with the contact address.
+ */
+export interface ClientNotificationRepository {
+  /** One client's notification profile (overrides + contact), or null. */
+  findNotificationProfile(id: string): Promise<ClientNotificationProfile | null>;
 }
 
 export interface ClientRepository {
@@ -76,6 +100,32 @@ export function createClientRepository(db: Database): ClientRepository {
         .where(inArray(clients.organizationId, organizationIds))
         .orderBy(asc(clients.name));
       return rows.map(toSummary);
+    },
+  };
+}
+
+export function createClientNotificationRepository(db: Database): ClientNotificationRepository {
+  return {
+    async findNotificationProfile(id) {
+      const rows = await db
+        .select({
+          id: clients.id,
+          name: clients.name,
+          billingEmail: clients.billingEmail,
+          notificationOverrides: clients.notificationOverrides,
+        })
+        .from(clients)
+        .where(eq(clients.id, id))
+        .limit(1);
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        name: row.name,
+        billingEmail: row.billingEmail,
+        notificationOverrides:
+          (row.notificationOverrides as Record<string, unknown> | null) ?? null,
+      };
     },
   };
 }
