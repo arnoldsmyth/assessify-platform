@@ -40,6 +40,50 @@ services:
     ports:
       - "8080:8080"
 
+  # S3-compatible object storage for local preview (Hetzner Object Storage
+  # stand-in). Our adapter (packages/adapters/src/storage/providers/s3.ts) is
+  # virtual-hosted-style only (bucket.host), so MinIO needs a hostname alias
+  # matching the bucket name — see the network alias below.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: assessify
+      MINIO_ROOT_PASSWORD: assessify123
+      MINIO_REGION_NAME: us-east-1
+      # Without this, MinIO assumes path-style and misparses our
+      # virtual-hosted-style requests (bucket.host) — first path segment
+      # gets read as the bucket name instead of the object key.
+      MINIO_DOMAIN: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - assessify-minio:/data
+    networks:
+      default:
+        aliases:
+          # Must equal {S3_BUCKET}.minio so the virtual-hosted-style adapter
+          # resolves the right container.
+          - assessify-assets.minio
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:latest
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 assessify assessify123 &&
+      (mc mb local/assessify-assets || true) &&
+      mc anonymous set download local/assessify-assets
+      "
+    depends_on:
+      minio:
+        condition: service_healthy
+
   migrate:
     build:
       context: .
@@ -66,12 +110,19 @@ services:
       REDIS_URL: redis://redis:6379
       ADMIN_HOSTNAMES: localhost,127.0.0.1,web
       PDF_SERVICE_URL: http://pdf-service:8080
+      S3_REGION: us-east-1
+      S3_BUCKET: assessify-assets
+      S3_ACCESS_KEY_ID: assessify
+      S3_SECRET_ACCESS_KEY: assessify123
+      S3_ENDPOINT: http://minio:9000
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      minio-init:
         condition: service_completed_successfully
 
   worker:
@@ -82,6 +133,11 @@ services:
       DATABASE_URL: postgres://assessify:assessify@postgres:5432/assessify
       REDIS_URL: redis://redis:6379
       PDF_SERVICE_URL: http://pdf-service:8080
+      S3_REGION: us-east-1
+      S3_BUCKET: assessify-assets
+      S3_ACCESS_KEY_ID: assessify
+      S3_SECRET_ACCESS_KEY: assessify123
+      S3_ENDPOINT: http://minio:9000
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +145,9 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
 
 volumes:
   assessify-postgres:
+  assessify-minio:
