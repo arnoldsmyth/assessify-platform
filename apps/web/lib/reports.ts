@@ -3,6 +3,7 @@ import { MemoryStorage } from '@assessify/adapters/storage/memory';
 import { S3Storage, s3ConfigFromEnv } from '@assessify/adapters/storage/s3';
 import { WeasyPrintPdfRenderer } from '@assessify/adapters/pdf/weasyprint';
 import {
+  getCompletionNotificationService,
   getReportService,
   getReportTemplateService,
   type ReportService,
@@ -10,6 +11,7 @@ import {
 } from '@assessify/services';
 
 import { getServerEnv } from './env';
+import { getJobQueue } from './queue';
 
 /**
  * Web composition root for report services (E3 — spec 09). Concrete
@@ -55,9 +57,24 @@ export function getWebReportTemplateService(): ReportTemplateService {
 }
 
 export function getWebReportService(): ReportService {
+  const env = getServerEnv();
   const pdf = getPdfRenderer();
+  // E6: completion notifications ride every release (manual admin releases
+  // happen on this side). The queue is needed because sends go through the
+  // notification service, which enqueues `notifications.send` (spec 13: no
+  // emails from request handlers); without it sends fail into the summary
+  // and the release itself still succeeds.
+  const queue = getJobQueue();
+  const completionNotifications = getCompletionNotificationService(
+    { ...(queue !== null && { queue }) },
+    {
+      slugBaseDomain: env.PRODUCT_SLUG_BASE_DOMAINS[0] ?? 'assessify.ie',
+      platformSender: { name: env.MAIL_FROM_NAME, address: env.MAIL_FROM_ADDRESS },
+    }
+  );
   return getReportService({
     storage: getWebObjectStorage(),
     ...(pdf ? { pdf } : {}),
+    onReleased: completionNotifications.onReportReleased,
   });
 }

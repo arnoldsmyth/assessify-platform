@@ -1,6 +1,7 @@
 export * from './audit';
 export * from './auth/caller-context';
 export * from './clients';
+export * from './completion-notifications';
 export * from './health';
 export * from './invitations';
 export * from './orders';

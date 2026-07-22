@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { notificationLog, type Database } from '@assessify/db';
 import {
   notificationLogEntrySchema,
@@ -46,6 +46,12 @@ export interface NotificationLogRepository {
     statuses: readonly NotificationStatus[],
     limit: number
   ): Promise<NotificationLogEntry[]>;
+  /**
+   * All entries of one kind referencing a session, newest first — E6's
+   * dedupe read: a re-released report must not re-send `report_ready` /
+   * `completion_notice` mail that already left (spec 13).
+   */
+  listByKindAndSession(kind: NotificationKind, sessionId: string): Promise<NotificationLogEntry[]>;
 }
 
 type NotificationLogRow = typeof notificationLog.$inferSelect;
@@ -125,6 +131,15 @@ export function createNotificationLogRepository(db: Database): NotificationLogRe
         .where(eq(notificationLog.id, id))
         .returning();
       return row ? toEntity(row) : null;
+    },
+
+    async listByKindAndSession(kind, sessionId) {
+      const rows = await db
+        .select()
+        .from(notificationLog)
+        .where(and(eq(notificationLog.kind, kind), eq(notificationLog.sessionId, sessionId)))
+        .orderBy(desc(notificationLog.createdAt), desc(notificationLog.id));
+      return rows.map(toEntity);
     },
 
     async listByStatuses(statuses, limit) {

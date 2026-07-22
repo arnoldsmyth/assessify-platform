@@ -19,6 +19,7 @@
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import {
+  getCompletionNotificationService,
   getHealth,
   getInvitationService,
   getNotificationService,
@@ -140,8 +141,28 @@ async function main(): Promise<void> {
   } catch {
     console.log('[worker] S3_* storage env not set — report.assemble jobs will fail');
   }
+  // Completion notifications (E6): report_ready/completion_notice mail per
+  // released report, resolved order > client > product (spec 13). Wired into
+  // the report service's `onReleased` seam so auto-releases during assembly
+  // notify exactly like manual ones; hook failures are audited, never fatal.
+  const completionNotifications = env.databaseUrl
+    ? getCompletionNotificationService(
+        { queue: jobQueue },
+        {
+          slugBaseDomain: env.slugBaseDomains[0] ?? 'assessify.ie',
+          platformSender: env.mailFrom,
+        }
+      )
+    : undefined;
   const reportsService =
-    env.databaseUrl && storage ? getReportService({ storage }) : undefined;
+    env.databaseUrl && storage
+      ? getReportService({
+          storage,
+          ...(completionNotifications && {
+            onReleased: completionNotifications.onReportReleased,
+          }),
+        })
+      : undefined;
 
   const registry = createProcessorRegistry({
     health: { getHealth },
