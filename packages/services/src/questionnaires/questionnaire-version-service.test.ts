@@ -56,6 +56,14 @@ const clientAdmin: CallerContext = {
   id: '33333333-3333-7333-8333-333333333333',
   roles: [assignment('client_admin', { clientId: '55555555-5555-7555-8555-555555555555' })],
 };
+// Better Auth user ids are NOT uuid-shaped (asy-3d4) — e.g.
+// 'LpsL6cXdIE1zgvLQoEL1aA5agzsd7bOq'. `questionnaire_versions.created_by`
+// must accept this shape without hitting Postgres 22P02.
+const betterAuthAdmin: CallerContext = {
+  kind: 'user',
+  id: 'LpsL6cXdIE1zgvLQoEL1aA5agzsd7bOq',
+  roles: [assignment('super_admin')],
+};
 
 function fixtureProduct(overrides: Partial<Product> = {}): Product {
   return {
@@ -338,6 +346,20 @@ describe('questionnaireVersionService.importDefinition', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('questionnaire_version/product_not_found');
+  });
+
+  it('records a text (Better Auth-shaped, non-uuid) caller id as created_by (asy-3d4)', async () => {
+    const { service, rows } = makeService();
+
+    const result = await service.importDefinition(betterAuthAdmin, {
+      productId: PRODUCT_ID,
+      definition: validDefinition(),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.createdBy).toBe(betterAuthAdmin.id);
+    expect(rows.get(result.value.id)?.createdBy).toBe(betterAuthAdmin.id);
   });
 
   it('allows the product’s assessment_admin and denies others', async () => {
