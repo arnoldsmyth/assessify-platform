@@ -1,0 +1,1 @@
+ALTER TABLE "questionnaire_versions" ALTER COLUMN "created_by" SET DATA TYPE text;

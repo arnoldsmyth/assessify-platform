@@ -72,7 +72,8 @@ export const questionnaireVersions = pgTable(
     definition: jsonb('definition').notNull(),
     /** draft | active | retired */
     status: text('status').notNull().default('draft'),
-    createdBy: uuid('created_by'),
+    /** Better Auth user id of the importer (text, not uuid — see auth.ts `user.id`); null for system imports. */
+    createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique().on(t.productId, t.version, t.variant)]
