@@ -42,6 +42,13 @@ CASES = [
     ("report_basic", "a4"),
     ("report_basic", "letter"),  # request pageSize must override @page size
     ("report_multipage", "a4"),
+    # E5 (asy-izb.5): the real PRO-D template, ALREADY MERGED — this is
+    # `mergeTemplate()`'s output against the fixture context in
+    # packages/services/src/reports/templates/pro-d/fixture.ts (byte-identical
+    # to that package's own golden, `templates/pro-d/__golden__/report.merged.html`).
+    # Proves the assembled report paginates correctly through the real
+    # pdf-service, not just that the merge engine produces valid markup.
+    ("report_pro_d", "a4"),
 ]
 
 
