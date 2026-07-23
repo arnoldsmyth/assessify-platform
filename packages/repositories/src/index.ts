@@ -38,8 +38,10 @@ export {
   createClientRepository,
   type ClientNotificationProfile,
   type ClientNotificationRepository,
+  type ClientPatch,
   type ClientRepository,
   type ClientSummary,
+  type NewClient,
 } from './postgres/clients';
 export {
   createOrganizationRepository,

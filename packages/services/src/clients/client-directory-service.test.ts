@@ -1,6 +1,6 @@
 import { systemCallerContext, type CallerContext, type RoleAssignment } from '@assessify/domain';
 import type { ClientRepository, ClientSummary } from '@assessify/repositories';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createClientDirectoryService } from './client-directory-service';
 
@@ -50,6 +50,13 @@ function makeService(seed: ClientSummary[]) {
     async listByOrganizationIds(organizationIds) {
       return seed.filter((client) => organizationIds.includes(client.organizationId));
     },
+    // Not exercised by the read-only directory — O1's client management
+    // flows have their own client-service.test.ts.
+    async findById() {
+      return null;
+    },
+    insert: vi.fn(),
+    update: vi.fn(),
   };
   return createClientDirectoryService({ clients: repo });
 }

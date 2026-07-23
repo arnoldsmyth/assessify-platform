@@ -167,6 +167,13 @@ function makeDeps(overrides: {
     async listByOrganizationIds() {
       return [];
     },
+    // Not exercised here — O1's client management flows have their own
+    // client-service.test.ts.
+    async findById() {
+      return null;
+    },
+    insert: vi.fn(),
+    update: vi.fn(),
   };
 
   const products = {

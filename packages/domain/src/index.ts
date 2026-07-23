@@ -1,5 +1,6 @@
 export * from './audit';
 export * from './caller-context';
+export * from './clients';
 export * from './errors';
 export * from './jobs';
 export * from './orders';
