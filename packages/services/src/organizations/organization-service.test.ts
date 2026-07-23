@@ -245,6 +245,13 @@ function makeClientsRepo(seed: ClientSummary[] = [clientSummary()]) {
     async listByOrganizationIds(organizationIds) {
       return seed.filter((c) => organizationIds.includes(c.organizationId));
     },
+    // Not exercised by organization-service — O1's client management flows
+    // have their own client-service.test.ts.
+    async findById() {
+      return null;
+    },
+    insert: vi.fn(),
+    update: vi.fn(),
   };
   return repo;
 }

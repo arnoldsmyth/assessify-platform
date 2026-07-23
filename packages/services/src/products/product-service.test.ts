@@ -187,6 +187,13 @@ function makeClientsRepo(): ClientRepository {
     async listByOrganizationIds(organizationIds) {
       return summaries.filter((client) => organizationIds.includes(client.organizationId));
     },
+    // Not exercised here — O1's client management flows have their own
+    // client-service.test.ts.
+    async findById() {
+      return null;
+    },
+    insert: vi.fn(),
+    update: vi.fn(),
   };
 }
 
