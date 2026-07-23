@@ -16,9 +16,11 @@ import {
   type Order,
   type Product,
   type ReportMergeContext,
+  type ReportMergeDimension,
   type ReportPageSize,
   type ReportStatus,
   type Result,
+  type ScoreSet,
 } from '@assessify/domain';
 import type { ObjectStorage, PdfRenderer } from '@assessify/adapters';
 import type {
@@ -146,6 +148,55 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /** Deterministic storage-key scheme for assembled HTML — ids only, no PII. */
 export function reportStorageKey(orderId: string, reportId: string): string {
   return `reports/${orderId}/${reportId}.html`;
+}
+
+/** `72.5` -> `"72.5"`, `70` -> `"70"` — one decimal place, no trailing `.0`. */
+function formatDimensionValue(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/**
+ * Long-form display date for the report header (E5 — `report.generatedAtLabel`
+ * on `reportMergeContextSchema`), e.g. "23 July 2026". Falls back to `en` for
+ * a language `Intl` doesn't recognise rather than failing assembly over a
+ * cosmetic field (same defensive pattern as `isWithinSendWindow` in
+ * `../reminders/reminder-service.ts`).
+ */
+export function formatReportDate(at: Date, language: string): string {
+  try {
+    return new Intl.DateTimeFormat(language, { dateStyle: 'long' }).format(at);
+  } catch {
+    return new Intl.DateTimeFormat('en', { dateStyle: 'long' }).format(at);
+  }
+}
+
+/**
+ * Flatten `scores.dimensions` (a `Record<string, number>`, spec 08) into the
+ * array the merge engine's `{{#each dimensions}}` can loop — see
+ * `reportMergeDimensionSchema` for why this can't be derived inside the
+ * template itself. Assessment-agnostic: only uses fields every ScoreSet has,
+ * resolves band labels through the already-loaded translation strings, and
+ * scales bar width against the highest dimension value in THIS score set
+ * (ScoreSet has no fixed min/max to normalize against).
+ */
+export function buildDimensionRows(scores: ScoreSet, strings: Record<string, string>): ReportMergeDimension[] {
+  const entries = Object.entries(scores.dimensions);
+  const maxValue = Math.max(0, ...entries.map(([, value]) => value));
+  return entries.map(([key, value]) => {
+    const bandKey = scores.bands?.[key] ?? null;
+    return {
+      key,
+      label: strings[key] ?? key,
+      value,
+      valueLabel: formatDimensionValue(value),
+      bandKey,
+      bandLabel: bandKey === null ? null : (strings[bandKey] ?? bandKey),
+      // One decimal place — a template-facing CSS/SVG width, not a raw
+      // percentile; full float precision would just make golden files noisy.
+      barPercent:
+        maxValue > 0 ? Math.round(Math.max(0, Math.min(100, (value / maxValue) * 100)) * 10) / 10 : 0,
+    };
+  });
 }
 
 /**
@@ -387,6 +438,7 @@ export function createReportService(deps: ReportServiceDeps): ReportService {
         kind: 'individual',
         language: resolved.value.language,
         generatedAt: at.toISOString(),
+        generatedAtLabel: formatReportDate(at, resolved.value.language),
         pageSize,
       },
       order: { id: order.id, reference: order.reference },
@@ -398,6 +450,7 @@ export function createReportService(deps: ReportServiceDeps): ReportService {
       },
       session: { completedAt: source.completedAt?.toISOString() ?? null },
       scores: scores.data,
+      dimensions: buildDimensionRows(scores.data, resolved.value.strings),
       t: resolved.value.strings,
     };
     const context = reportMergeContextSchema.safeParse(contextCandidate);

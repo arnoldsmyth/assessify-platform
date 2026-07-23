@@ -17,7 +17,13 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuditService } from '../audit';
-import { canReleaseReports, createReportService, templateStorageKey } from './index';
+import {
+  buildDimensionRows,
+  canReleaseReports,
+  createReportService,
+  formatReportDate,
+  templateStorageKey,
+} from './index';
 
 const SESSION_ID = '01890000-0000-7000-8000-00000000aa01';
 const ORDER_ID = '01890000-0000-7000-8000-00000000bb01';
@@ -353,7 +359,22 @@ describe('reportService.assemble', () => {
     expect(report?.templateVersionId).toBe(TEMPLATE_ID);
     expect(report?.sessionId).toBe(SESSION_ID);
 
-    const data = report?.data as { storageKey: string; context: { respondent: { fullName: string } } };
+    const data = report?.data as {
+      storageKey: string;
+      context: {
+        respondent: { fullName: string };
+        report: { generatedAtLabel: string };
+        dimensions: Array<{
+          key: string;
+          label: string;
+          value: number;
+          valueLabel: string;
+          bandKey: string | null;
+          bandLabel: string | null;
+          barPercent: number;
+        }>;
+      };
+    };
     expect(data.storageKey).toBe(`reports/${ORDER_ID}/${result.value.reportId}.html`);
     const stored = await storage.download(data.storageKey);
     const html = new TextDecoder().decode(stored!.body);
@@ -361,6 +382,22 @@ describe('reportService.assemble', () => {
     expect(html).toContain('<p>Ada Lovelace</p>');
     expect(html).toContain('<span>72.5</span>');
     expect(data.context.respondent.fullName).toBe('Ada Lovelace');
+    // Derived `dimensions` array (E5) — flattens ScoreSet.dimensions/bands so
+    // `{{#each dimensions}}` in the template can loop it; label/band label
+    // fall back to the raw key when the resolved strings don't carry them.
+    expect(data.context.dimensions).toEqual([
+      {
+        key: 'drive',
+        label: 'drive',
+        value: 72.5,
+        valueLabel: '72.5',
+        bandKey: 'high',
+        bandLabel: 'high',
+        barPercent: 100,
+      },
+    ]);
+    // Long-form display date for the header (E5) — NOW is 2026-07-20 in `en`.
+    expect(data.context.report.generatedAtLabel).toBe('July 20, 2026');
 
     expect(markReportReady).toHaveBeenCalledWith(SESSION_ID, NOW);
     // Single focal session with a ready report → reports_ready fired.
@@ -687,5 +724,84 @@ describe('respondent-facing report serving', () => {
     await noRenderer.service.release(superAdmin, assembled2.value.reportId);
     const result2 = await noRenderer.service.renderPdfForSession(SESSION_ID);
     expect(!result2.ok && result2.error.code === 'report/pdf_renderer_unavailable').toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDimensionRows — the ScoreSet -> `{{#each dimensions}}` flattening (E5)
+// ---------------------------------------------------------------------------
+
+describe('buildDimensionRows', () => {
+  it('scales barPercent against the highest dimension value and resolves labels/bands', () => {
+    const rows = buildDimensionRows(
+      { dimensions: { drive: 72.5, focus: 40, resilience: 100 }, bands: { drive: 'high', focus: 'low' } },
+      { drive: 'Drive', focus: 'Focus', high: 'High', low: 'Low' }
+    );
+    expect(rows).toEqual([
+      {
+        key: 'drive',
+        label: 'Drive',
+        value: 72.5,
+        valueLabel: '72.5',
+        bandKey: 'high',
+        bandLabel: 'High',
+        barPercent: 72.5,
+      },
+      {
+        key: 'focus',
+        label: 'Focus',
+        value: 40,
+        valueLabel: '40',
+        bandKey: 'low',
+        bandLabel: 'Low',
+        barPercent: 40,
+      },
+      {
+        key: 'resilience',
+        label: 'resilience',
+        value: 100,
+        valueLabel: '100',
+        bandKey: null,
+        bandLabel: null,
+        barPercent: 100,
+      },
+    ]);
+  });
+
+  it('falls back to the raw key/band key when no translation string resolves them', () => {
+    const rows = buildDimensionRows({ dimensions: { drive: 50 }, bands: { drive: 'unmapped_key' } }, {});
+    expect(rows[0]).toMatchObject({ label: 'drive', bandKey: 'unmapped_key', bandLabel: 'unmapped_key' });
+  });
+
+  it('does not divide by zero when every dimension is zero or negative', () => {
+    const rows = buildDimensionRows({ dimensions: { drive: 0, focus: -5 } }, {});
+    expect(rows).toEqual([
+      { key: 'drive', label: 'drive', value: 0, valueLabel: '0', bandKey: null, bandLabel: null, barPercent: 0 },
+      { key: 'focus', label: 'focus', value: -5, valueLabel: '-5', bandKey: null, bandLabel: null, barPercent: 0 },
+    ]);
+  });
+
+  it('returns an empty array for an empty ScoreSet', () => {
+    expect(buildDimensionRows({ dimensions: {} }, {})).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatReportDate — `report.generatedAtLabel` (E5)
+// ---------------------------------------------------------------------------
+
+describe('formatReportDate', () => {
+  const AT = new Date('2026-07-20T10:00:00Z');
+
+  it('formats a long-form date in the given language', () => {
+    expect(formatReportDate(AT, 'en')).toBe('July 20, 2026');
+  });
+
+  it('formats in a non-English language', () => {
+    expect(formatReportDate(AT, 'fr')).toBe('20 juillet 2026');
+  });
+
+  it('falls back to `en` for a language tag Intl rejects', () => {
+    expect(formatReportDate(AT, 'en_US')).toBe('July 20, 2026');
   });
 });

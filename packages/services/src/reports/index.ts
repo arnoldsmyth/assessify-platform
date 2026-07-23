@@ -17,8 +17,10 @@ export {
   type UploadReportTemplateInput,
 } from './report-template-service';
 export {
+  buildDimensionRows,
   canReleaseReports,
   createReportService,
+  formatReportDate,
   reportDataSnapshotSchema,
   reportStorageKey,
   type AssembledReportReceipt,

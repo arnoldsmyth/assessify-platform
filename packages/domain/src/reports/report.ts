@@ -120,6 +120,46 @@ export function resolveReportReleasePolicy(
 // ---------------------------------------------------------------------------
 
 /**
+ * One dimension's report-ready row, derived from the ScoreSet by the
+ * assembly service (`report-service.ts`) before the merge context is built.
+ * This is NOT part of `ScoreSet` itself (`packages/domain/src/scoring.ts`) —
+ * `scores.dimensions` there is a `Record<string, number>` (spec 08), and the
+ * merge engine's `{{#each}}` only expands arrays (`packages/services/src/
+ * reports/merge.ts`), so a template cannot loop the record directly.
+ *
+ * `dimensions` is therefore an assessment-agnostic flattening added to the
+ * merge context (E5, docs/spec/09-reports-and-pdf.md): value formatting, the
+ * `scores.bands[key]` -> `t[bandKey]` label lookup already implied by spec 08
+ * ("band label KEY, resolved via translations at render"), and a relative
+ * bar width for a server-rendered SVG dimension chart. `ScoreSet` carries no
+ * fixed min/max, so `barPercent` is scaled against the highest-scoring
+ * dimension IN THIS report rather than assuming any particular scale (e.g.
+ * 0-100) — this stays generic across scoring engines and products.
+ */
+export const reportMergeDimensionSchema = z
+  .object({
+    key: z.string().min(1),
+    /**
+     * Display name for the dimension. `scoreKeySchema` (spec 08) is explicit
+     * that dimension keys are "machine identifiers, never display text", so
+     * a template has no other way to show a human label — resolved via
+     * `t[key]` the same way band keys are, falling back to the raw key.
+     */
+    label: z.string().min(1),
+    value: z.number().finite(),
+    /** `value` formatted for display (one decimal place, trailing `.0` trimmed). */
+    valueLabel: z.string().min(1),
+    /** `scores.bands[key]`, or null when the ScoreSet has no band for this dimension. */
+    bandKey: z.string().nullable(),
+    /** Resolved via `t[bandKey]`; falls back to the raw key when no translation exists. */
+    bandLabel: z.string().nullable(),
+    /** 0-100, relative to the highest dimension value in this score set. */
+    barPercent: z.number().min(0).max(100),
+  })
+  .strict();
+export type ReportMergeDimension = z.infer<typeof reportMergeDimensionSchema>;
+
+/**
  * The Zod-validated context handed to the merge engine and snapshotted to
  * `reports.data` (spec 09: rendering never re-queries live data, so
  * historical reports are reproducible byte-for-byte). Assessment-agnostic:
@@ -138,6 +178,14 @@ export const reportMergeContextSchema = z
       language: z.string().min(1),
       /** ISO-8601 assembly instant. */
       generatedAt: z.string().min(1),
+      /**
+       * Human-readable rendering of `generatedAt` in the report's language
+       * (e.g. "23 July 2026") — added for E5's template header. The merge
+       * engine has no date-formatting helper (spec 09/E3: "no conditionals,
+       * no helpers, no expressions"), so any template needing a display date
+       * needs it pre-formatted here rather than parsing `generatedAt` itself.
+       */
+      generatedAtLabel: z.string().min(1),
       pageSize: reportPageSizeSchema,
     }),
     order: z.object({
@@ -159,6 +207,8 @@ export const reportMergeContextSchema = z
     }),
     /** The session's normalized score document (spec 08 ScoreSet). */
     scores: scoreSetSchema,
+    /** Per-dimension rows for `{{#each dimensions}}` — see reportMergeDimensionSchema. */
+    dimensions: z.array(reportMergeDimensionSchema),
     /** Resolved translation strings for the report language (B4). */
     t: z.record(z.string(), z.string()),
   })
